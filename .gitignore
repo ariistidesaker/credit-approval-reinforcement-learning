@@ -1,0 +1,27 @@
+# Fichiers et plans de conception internes
+implementation_plan.md
+
+# Python & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environnements virtuels
+.venv/
+venv/
+env/
+ENV/
+
+# Tests & IDE
+.pytest_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+.gemini/
+
+# Fichiers OS
+.DS_Store
+Thumbs.db
