@@ -21,7 +21,9 @@ Ce document détaille le fonctionnement global du projet, explique les fondement
    - [6.8 src/train_ppo.py (Boucle d'Entraînement & Checkpoint)](#68-srctrain_ppopy)
    - [6.9 tests/test_environment.py & tests/test_ppo.py (Tests Unitaires)](#69-teststest_environmentpy--teststest_ppopy)
    - [6.10 main.py (Pipeline Global & Benchmark)](#610-mainpy)
-7. [Résultats et Comparaison Approfondie des Stratégies](#7-résultats-et-comparaison-approfondie-des-stratégies)
+8. [Système de Monitoring (TensorBoard & Visualisation)](#8-système-de-monitoring-tensorboard--visualisation)
+9. [Déploiement Web Interactif avec Streamlit (app.py)](#9-déploiement-web-interactif-avec-streamlit-apppy)
+10. [Résultats et Comparaison Approfondie des Stratégies](#10-résultats-et-comparaison-approfondie-des-stratégies)
 
 ---
 
@@ -257,7 +259,29 @@ L'interface est alors accessible dans votre navigateur à l'adresse : `http://lo
 
 ---
 
-## 9. Résultats et Comparaison Approfondie des Stratégies
+## 9. Déploiement Web Interactif avec Streamlit (`app.py`)
+
+L'application [`app.py`](app.py) fournit une interface utilisateur moderne et intuitive pour interagir directement avec le modèle de Reinforcement Learning.
+
+### 9.1 Fonctionnalités de l'Interface Web
+1. **Simulateur de Décision Client Individuel (Temps Réel)** :
+   - Formulaire dynamique permettant de modifier le score FICO, les revenus, l'âge, le montant du prêt, le collatéral et les facteurs macroéconomiques.
+   - Prédiction instantanée avec l'agent PPO (`models/best_ppo_agent.pt`).
+   - Affichage du verdict (Accord / Refus) avec les probabilités de décision de la politique $\pi_\theta(a|s)$, la probabilité estimée de défaut $P(\text{Défaut})$, le ratio Dette/Revenu (DTI), le taux de couverture des garanties et le gain ou la perte potentielle.
+2. **Tableau de Bord Portefeuille & Benchmark Comparatif** :
+   - Évaluation en 1 clic sur les 500 dossiers du dataset historique.
+   - Graphiques interactifs Plotly comparant le Profit Net, le ROI, le Taux d'Approbation et le Taux de Défaut face aux stratégies de référence.
+3. **Théorie du MDP & Monitoring Visuel** :
+   - Consultation des spécifications du MDP et visualisation intégrée des courbes d'apprentissage (`reports/learning_curves.png`).
+
+### 9.2 Commande de Lancement
+```bash
+streamlit run app.py
+```
+
+---
+
+## 10. Résultats et Comparaison Approfondie des Stratégies
 
 L'évaluation sur l'ensemble du portefeuille de 500 dossiers de demandes de crédit donne les résultats suivants :
 

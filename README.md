@@ -22,10 +22,11 @@ Contrairement à un modèle de scoring supervisé classique qui prédit uniqueme
 credit-approval-reinforcement-learning/
 ├── .gitignore                    # Fichiers ignorés par Git
 ├── README.md                     # Documentation principale
-├── requirements.txt              # Dépendances Python (torch, gymnasium, scikit-learn, etc.)
+├── requirements.txt              # Dépendances Python (torch, gymnasium, streamlit, plotly, etc.)
 ├── pytest.ini                    # Configuration pytest
+├── app.py                        # Application Web Interactive Streamlit
 ├── main.py                       # Point d'entrée : entraînement PPO & benchmark des baselines
-├── EXPLICATION_WORKFLOW_MDP.md   # Guide exhaustif du MDP, théorie PPO et analyse du code
+├── EXPLICATION_WORKFLOW_MDP.md   # Guide exhaustif du MDP, théorie PPO, monitoring et déploiement
 ├── data/
 │   ├── download_data.py          # Script de téléchargement automatique Kaggle
 │   └── synthetic_sadc_lgd_dataset.csv # Dataset SADC LGD (500 dossiers)
@@ -34,6 +35,7 @@ credit-approval-reinforcement-learning/
 │   ├── preprocessing.py          # Nettoyage, feature engineering & normalisation
 │   ├── utils.py                  # Probabilité de défaut P(Défaut) et calculs financiers
 │   ├── credit_mdp_env.py         # Environnement MDP (Gymnasium Env)
+│   ├── monitoring.py             # Logger TensorBoard, export CSV et graphiques
 │   ├── train_ppo.py              # Boucle d'entraînement PPO & tracking de métriques
 │   └── ppo/
 │       ├── __init__.py
@@ -42,9 +44,15 @@ credit-approval-reinforcement-learning/
 │       └── agent.py              # Classe PPOAgent (perte clippée, update, save/load)
 ├── models/
 │   └── best_ppo_agent.pt         # Poids du meilleur modèle PPO entraîné
+├── reports/
+│   ├── learning_curves.png       # Graphiques d'entraînement multi-panneaux
+│   └── training_history.csv      # Historique complet des métriques par épisode
+├── runs/                         # Événements et logs TensorBoard
 └── tests/
     ├── test_environment.py       # Tests unitaires de l'environnement MDP
-    └── test_ppo.py               # Tests unitaires de l'architecture et de l'entraînement PPO
+    ├── test_ppo.py               # Tests unitaires de l'architecture et de l'entraînement PPO
+    ├── test_monitoring.py        # Tests unitaires du logging et des courbes
+    └── test_streamlit_app.py     # Tests unitaires de l'application Streamlit
 ```
 
 ---
@@ -73,14 +81,15 @@ pip install -r requirements.txt
 
 ---
 
-## 🚀 Utilisation
+## 🚀 Utilisation & Déploiement
 
-### 1. Télécharger les Données
+### 1. Lancer l'Application Web Interactive Streamlit
 ```bash
-python data/download_data.py
+streamlit run app.py
 ```
+*L'application s'ouvre automatiquement dans votre navigateur avec le simulateur interactif de crédit, le benchmark de portefeuille et l'analyse de risque en temps réel.*
 
-### 2. Lancer la Démonstration et le Benchmark (Baselines & Agent PPO)
+### 2. Lancer la Démonstration et le Benchmark en Ligne de Commande
 ```bash
 python main.py
 ```
