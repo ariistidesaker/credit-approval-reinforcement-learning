@@ -22,20 +22,29 @@ Contrairement à un modèle de scoring supervisé classique qui prédit uniqueme
 credit-approval-reinforcement-learning/
 ├── .gitignore                    # Fichiers ignorés par Git
 ├── README.md                     # Documentation principale
-├── requirements.txt              # Dépendances Python
+├── requirements.txt              # Dépendances Python (torch, gymnasium, scikit-learn, etc.)
 ├── pytest.ini                    # Configuration pytest
-├── main.py                       # Démonstration, rollout et benchmark des baselines
-├── EXPLICATION_WORKFLOW_MDP.md   # Guide exhaustif du MDP et analyse du code
+├── main.py                       # Point d'entrée : entraînement PPO & benchmark des baselines
+├── EXPLICATION_WORKFLOW_MDP.md   # Guide exhaustif du MDP, théorie PPO et analyse du code
 ├── data/
 │   ├── download_data.py          # Script de téléchargement automatique Kaggle
 │   └── synthetic_sadc_lgd_dataset.csv # Dataset SADC LGD (500 dossiers)
 ├── src/
 │   ├── __init__.py
 │   ├── preprocessing.py          # Nettoyage, feature engineering & normalisation
-│   ├── utils.py                  # Modélisation du défaut P(Défaut) et calculs financiers
-│   └── credit_mdp_env.py         # Environnement MDP (Gymnasium Env)
+│   ├── utils.py                  # Probabilité de défaut P(Défaut) et calculs financiers
+│   ├── credit_mdp_env.py         # Environnement MDP (Gymnasium Env)
+│   ├── train_ppo.py              # Boucle d'entraînement PPO & tracking de métriques
+│   └── ppo/
+│       ├── __init__.py
+│       ├── networks.py           # Réseaux de neurones PyTorch (Actor, Critic, ActorCritic)
+│       ├── buffer.py             # RolloutBuffer & Generalized Advantage Estimation (GAE)
+│       └── agent.py              # Classe PPOAgent (perte clippée, update, save/load)
+├── models/
+│   └── best_ppo_agent.pt         # Poids du meilleur modèle PPO entraîné
 └── tests/
-    └── test_environment.py      # Tests unitaires et conformité Gymnasium
+    ├── test_environment.py       # Tests unitaires de l'environnement MDP
+    └── test_ppo.py               # Tests unitaires de l'architecture et de l'entraînement PPO
 ```
 
 ---
@@ -71,14 +80,15 @@ pip install -r requirements.txt
 python data/download_data.py
 ```
 
-### 2. Lancer la Démonstration et le Benchmark des Baselines
+### 2. Lancer la Démonstration et le Benchmark (Baselines & Agent PPO)
 ```bash
 python main.py
 ```
+*Options disponibles : `python main.py --episodes 200 --retrain` pour relancer un entraînement complet.*
 
-### 3. Lancer la Suite de Tests Unitaires
+### 3. Lancer la Suite Complète de Tests Unitaires
 ```bash
-python -m pytest tests/test_environment.py
+python -m pytest tests/
 ```
 
 ---

@@ -1,6 +1,6 @@
-# Guide Explicatif Complet : Workflow, MDP & Analyse Détaillée du Code
+# Guide Explicatif Complet : Workflow, MDP, Architecture PPO & Analyse Détaillée du Code
 
-Ce document détaille le fonctionnement global du projet, explique les fondements théoriques et pratiques du **Processus de Décision Markovien (MDP)**, et fournit une **explication exhaustive du code** implémenté pour l'optimisation de l'approbation de prêts bancaires par Reinforcement Learning (RL).
+Ce document détaille le fonctionnement global du projet, explique les fondements théoriques et pratiques du **Processus de Décision Markovien (MDP)**, et fournit une **explication exhaustive du code** implémenté pour l'optimisation de l'approbation de prêts bancaires par Reinforcement Learning (**Proximal Policy Optimization - PPO**).
 
 ---
 
@@ -9,14 +9,19 @@ Ce document détaille le fonctionnement global du projet, explique les fondement
 2. [Qu'est-ce qu'un MDP (Markov Decision Process) ?](#2-quest-ce-quun-mdp-markov-decision-process-)
 3. [Modélisation Mathématique du MDP de Crédit](#3-modélisation-mathématique-du-mdp-de-crédit)
 4. [Schéma Global du Workflow](#4-schéma-global-du-workflow)
-5. [Explication Ligne par Ligne / Bloc par Bloc du Code](#5-explication-détaillée-du-code-source)
-   - [5.1 data/download_data.py (Téléchargement Kaggle)](#51-datadownload_datapy)
-   - [5.2 src/preprocessing.py (Feature Engineering & Encodage)](#52-srcpreprocessingpy)
-   - [5.3 src/utils.py (Modélisation Financière & Défaut)](#53-srcutilspy)
-   - [5.4 src/credit_mdp_env.py (Environnement MDP Gymnasium)](#54-srccredit_mdp_envpy)
-   - [5.5 tests/test_environment.py (Tests de Conformité)](#55-teststest_environmentpy)
-   - [5.6 main.py (Boucle d'Évaluation & Baselines)](#56-mainpy)
-6. [Résultats et Comparaison des Stratégies](#6-résultats-et-comparaison-des-stratégies)
+5. [Théorie & Algorithme PPO (Proximal Policy Optimization)](#5-théorie--algorithme-ppo-proximal-policy-optimization)
+6. [Explication Ligne par Ligne / Bloc par Bloc du Code](#6-explication-détaillée-du-code-source)
+   - [6.1 data/download_data.py (Téléchargement Kaggle)](#61-datadownload_datapy)
+   - [6.2 src/preprocessing.py (Feature Engineering & Encodage)](#62-srcpreprocessingpy)
+   - [6.3 src/utils.py (Modélisation Financière & Défaut)](#63-srcutilspy)
+   - [6.4 src/credit_mdp_env.py (Environnement MDP Gymnasium)](#64-srccredit_mdp_envpy)
+   - [6.5 src/ppo/networks.py (Réseaux Actor-Critic)](#65-srcpponetworkspy)
+   - [6.6 src/ppo/buffer.py (RolloutBuffer & GAE-λ)](#66-srcppobufferpy)
+   - [6.7 src/ppo/agent.py (Agent PPO & Perte Clippée)](#67-srcppoagentpy)
+   - [6.8 src/train_ppo.py (Boucle d'Entraînement & Checkpoint)](#68-srctrain_ppopy)
+   - [6.9 tests/test_environment.py & tests/test_ppo.py (Tests Unitaires)](#69-teststest_environmentpy--teststest_ppopy)
+   - [6.10 main.py (Pipeline Global & Benchmark)](#610-mainpy)
+7. [Résultats et Comparaison Approfondie des Stratégies](#7-résultats-et-comparaison-approfondie-des-stratégies)
 
 ---
 
@@ -26,9 +31,9 @@ Dans le secteur bancaire classique, l'octroi de crédits est traditionnellement 
 > *« Prédire si la probabilité de défaut $P(\text{Défaut}) > \text{seuil}$. »*
 
 ### Les limites de l'approche supervisée :
-1. **Absence d'optimisation financière globale** : Un client avec un risque modéré ($20\%$ de chance de défaut) mais demandant un prêt important avec un taux d'intérêt rémunérateur et une bonne garantie collatérale peut générer un profit net bien supérieur à un client à risque quasi-nul demandant un petit montant.
+1. **Absence d'optimisation financière globale** : Un client avec un risque modéré ($20\%$ de chance de défaut) mais demandant un prêt important avec un taux d'intérêt rémunérateur et une bonne garantie collatérale (*Asset Coverage*) peut générer un profit net bien supérieur à un client à risque quasi-nul demandant un petit montant.
 2. **Gestion de contraintes de portefeuille** : Une banque opère avec un capital limité, des coûts de refinancement (*Cost of Funds*), et des limites de tolérance au risque sur l'ensemble de son portefeuille.
-3. **Le Reinforcement Learning (RL)** permet à un agent d'apprendre directement une **stratégie optimale d'octroi** maximisant le profit cumulé à long terme tout en maîtrisant les pertes.
+3. **Le Reinforcement Learning (RL)** permet à un agent d'apprendre directement une **stratégie décisionnelle optimale séquentielle** maximisant le profit cumulé à long terme tout en maîtrisant les pertes par défaut.
 
 ---
 
@@ -53,8 +58,6 @@ $$\mathbb{P}(S_{t+1} = s' \mid S_t = s_t, A_t = a_t, S_{t-1}, A_{t-1}, \dots) = 
 ---
 
 ## 3. Modélisation Mathématique du MDP de Crédit
-
-Dans notre projet :
 
 ```mermaid
 graph TD
@@ -105,7 +108,7 @@ Chaque état représente un dossier de demande de prêt composé de 18 variables
 - Si $a = 1$ (Approbation) :
   - **Sans défaut** : $\text{Gain} = \text{EAD} \times (r_{\text{prêt}} - r_{\text{fonds}}) \times \frac{\text{Durée}}{12}$
   - **Avec défaut** : $\text{Perte} = - \left(\text{EAD} \times \text{LGD} - \text{Collatéral} \times \text{Décote}\right)_+$
-- **Mise à l'échelle** : $r_t = \text{Profit Net} \times 10^{-4}$ (pour stabiliser l'apprentissage RL).
+- **Mise à l'échelle** : $r_t = \text{Profit Net} \times 10^{-4}$ (pour stabiliser l'apprentissage par réseau de neurones).
 
 ---
 
@@ -117,214 +120,126 @@ flowchart TD
     B -->|"preprocessing.py"| C["3. Pipeline de Preprocessing<br/>Nettoyage, Ratios, One-Hot & Scaling"]
     C -->|"Matrice des etats 500x18"| D["4. Gymnasium Env MDP<br/>credit_mdp_env.py"]
     E["Modelisation Risque P_Defaut<br/>utils.py"] --> D
-    D -->|"reset et step"| F["5. Demonstration & Baselines<br/>main.py"]
-    D -.->|"Interface standard"| G["6. Agents RL : DQN / PPO<br/>Prochaine Etape"]
+    D -->|"reset et step"| F["5. Entraînement PPO & Buffer GAE<br/>src/ppo/ & train_ppo.py"]
+    F --> G["6. Benchmark Final & Évaluation Baselines<br/>main.py"]
 ```
 
 ---
 
-## 5. Explication Détaillée du Code Source
+## 5. Théorie & Algorithme PPO (Proximal Policy Optimization)
 
-### 5.1 `data/download_data.py`
-Ce script gère la récupération sécurisée et le stockage local des données.
+PPO est un algorithme de type **Policy Gradient Actor-Critic** qui garantit des mises à jour stables sans déstabiliser la politique.
 
-```python
-import os, shutil, kagglehub, pandas as pd
+### 5.1 Objectif Clippé (*Clipped Surrogate Objective*)
+Pour éviter des mises à jour destructives de la politique $\pi_\theta$, PPO restreint le ratio de probabilité $r_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)}$ dans un intervalle $[1-\epsilon, 1+\epsilon]$ (avec $\epsilon = 0.2$) :
 
-DATASET_IDENTIFIER = "zvikomborerocmufari/southern-african-banks-lgd-data-simulation"
-TARGET_FILENAME = "synthetic_sadc_lgd_dataset.csv"
+$$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]$$
 
-def download_and_save_data(target_dir: str = "data") -> str:
-```
-- **Vérification d'existence préalable** : Si le fichier `data/synthetic_sadc_lgd_dataset.csv` existe déjà, il évite un re-téléchargement inutile.
-- **Téléchargement Kaggle (`kagglehub.dataset_download`)** : Récupère automatiquement les fichiers publics sans nécessiter d'authentification manuelle.
-- **Copie et persistance (`shutil.copy`)** : Place le fichier CSV dans le dossier `data/` du projet.
+### 5.2 Generalized Advantage Estimation (GAE-$\lambda$)
+L'avantage $\hat{A}_t$ mesure combien l'action choisie a été meilleure que l'action moyenne estimée par la fonction de valeur $V_\phi(s)$ :
 
----
+$$\delta_t^V = r_t + \gamma V_\phi(s_{t+1}) (1 - d_t) - V_\phi(s_t)$$
+$$\hat{A}_t^{\text{GAE}(\gamma, \lambda)} = \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}^V$$
 
-### 5.2 `src/preprocessing.py`
-Contient la classe `CreditDataPreprocessor` qui transforme les données brutes en un tenseur d'états propre.
-
-#### 1. Nettoyage et Feature Engineering (`clean_and_feature_engineer`) :
-```python
-def clean_and_feature_engineer(self, df: pd.DataFrame) -> pd.DataFrame:
-    data = df.copy()
-    # Correction des valeurs aberrantes
-    data["Exposure_at_Default"] = data["Exposure_at_Default"].apply(lambda x: max(1000.0, abs(x)))
-    data["Risk_Score"] = data["Risk_Score"].clip(300.0, 850.0)
-    data["LGD"] = data["LGD"].clip(0.0, 1.0)
-```
-- Rectifie les éventuelles valeurs négatives d'EAD issues de la simulation synthétique.
-- Borne le score de risque entre 300 et 850 et la sévérité LGD entre 0 et 1.
-
-#### 2. Calcul des Ratios Financiers :
-```python
-    monthly_interest_rate = (data["Lending_Rate_Percent"] / 100.0) / 12.0
-    n_months = data["Loan_Duration_Months"].clip(lower=1)
-    estimated_monthly_payment = (
-        data["Exposure_at_Default"] * (1 + monthly_interest_rate * n_months)
-    ) / n_months
-
-    # Ratio Dette/Revenu
-    monthly_income = data["Household_Income"] / 12.0
-    data["Debt_to_Income_Ratio"] = (estimated_monthly_payment / monthly_income).clip(0.0, 5.0)
-
-    # Ratio de Couverture Collatéral
-    data["Coverage_Ratio"] = (data["Asset_Coverage_Value"] / data["Exposure_at_Default"]).clip(0.0, 5.0)
-```
-- Calcule la mensualité théorique du prêt.
-- Détermine le ratio d'endettement mensuel (`Debt_to_Income_Ratio`) et le ratio de couverture des garanties (`Coverage_Ratio`).
-
-#### 3. Normalisation & Encodage (`fit_transform`) :
-```python
-    self.scaler.fit(self.clean_df[self.NUMERICAL_COLS])      # StandardScaler
-    self.encoder.fit(self.clean_df[self.CATEGORICAL_COLS])  # OneHotEncoder
-```
-- `StandardScaler` centre et réduit les 12 variables numériques ($\mu=0, \sigma=1$).
-- `OneHotEncoder` transforme les 2 colonnes catégorielles en 6 colonnes binaires (0 ou 1).
-- Concatène le tout en une matrice `(500, 18)` de type `float32`.
+### 5.3 Fonction de Perte Globale
+$$L^{\text{total}}(\theta, \phi) = - L^{\text{CLIP}}(\theta) + c_1 L^{VF}(\phi) - c_2 S[\pi_\theta](s_t)$$
+- $L^{VF}(\phi) = \frac{1}{2} \hat{\mathbb{E}}_t \left[ (V_\phi(s_t) - R_t)^2 \right]$ : Erreur quadratique du Critic.
+- $S[\pi_\theta](s_t)$ : Entropie de la politique pour encourager l'exploration ($c_2 = 0.01$).
 
 ---
 
-### 5.3 `src/utils.py`
-Fournit le moteur probabiliste de crédit et le calcul des flux financiers.
+## 6. Explication Détaillée du Code Source
 
-#### 1. Estimation du Risque de Défaut (`calculate_default_probability`) :
-```python
-def calculate_default_probability(row: pd.Series) -> float:
-    # 1. Score standardisé (plus le score est élevé, plus le risque diminue)
-    score_z = (float(row["Risk_Score"]) - 580.0) / 100.0
-    
-    # 2. Pénalités de surendettement et d'emploi
-    dti_penalty = max(0.0, float(row.get("Debt_to_Income_Ratio", 0.3)) - 0.4) * 1.5
-    employment = str(row.get("Employment_Status", "Employed"))
-    emp_penalty = 0.4 if employment == "Unemployed" else (0.1 if employment == "Self-Employed" else -0.2)
-    
-    # 3. Stress macroéconomique
-    macro_penalty = (float(row.get("Inflation_Rate_Percent", 80.0)) - 80.0) / 100.0 * 0.3
-    
-    # Sigmoïde logistique
-    logit = -1.2 - (1.5 * score_z) + dti_penalty + emp_penalty + macro_penalty
-    return float(np.clip(1.0 / (1.0 + np.exp(-logit)), 0.01, 0.95))
-```
-- Modélise fidèlement le comportement d'un modèle de scoring bancaire : un bon score FICO réduit fortement le risque, tandis qu'un fort ratio d'endettement ou une inflation galopante l'augmente.
-
-#### 2. Calcul du Résultat Financier (`calculate_financial_outcome`) :
-```python
-def calculate_financial_outcome(row, action, cost_of_funds_annual=0.05, operational_cost_reject=10.0, ...):
-    if action == 0:
-        return {"action": 0, "net_profit": -operational_cost_reject, ...}
-    
-    is_default = rng.random() < p_default
-    if not is_default:
-        profit = ead * (lending_rate - cost_of_funds_annual) * duration_years
-        return {"action": 1, "net_profit": profit, "defaulted": False, ...}
-    else:
-        gross_loss = ead * lgd
-        recoverable = min(gross_loss, asset_coverage * collateral_haircut)
-        net_loss = max(0.0, gross_loss - recoverable)
-        return {"action": 1, "net_profit": -net_loss, "defaulted": True, ...}
-```
-- Simule l'occurrence du défaut par tirage de Bernoulli selon $P(\text{Défaut})$.
-- En cas de remboursement : calcule la marge d'intérêts nette ($r_{\text{lending}} - r_{\text{funds}}$).
-- En cas de défaut : calcule la perte nette après saisie et décote de la garantie collatérale.
+### 6.1 `data/download_data.py`
+Téléchargement automatisé du dataset Kaggle `zvikomborerocmufari/southern-african-banks-lgd-data-simulation` sans token requis via `kagglehub` et copie dans `data/synthetic_sadc_lgd_dataset.csv`.
 
 ---
 
-### 5.4 `src/credit_mdp_env.py`
-C'est le cœur du MDP, implémenté sous la classe `CreditApprovalEnv(gym.Env)`.
-
-#### 1. Initialisation (`__init__`) :
-```python
-class CreditApprovalEnv(gym.Env):
-    def __init__(self, ...):
-        self.action_space = spaces.Discrete(2) # 0: Rejeter, 1: Approuver
-        self.observation_space = spaces.Box(low=-10.0, high=10.0, shape=(18,), dtype=np.float32)
-```
-- Définit les espaces conformes à **Gymnasium**.
-- Charge le preprocessor et extrait la matrice d'états de 500 dossiers.
-
-#### 2. Réinitialisation (`reset`) :
-```python
-def reset(self, *, seed=None, options=None):
-    super().reset(seed=seed)
-    self.sample_indices = np.arange(self.num_samples)
-    if self.shuffle_on_reset:
-        self._np_random.shuffle(self.sample_indices)
-    self.current_step = 0
-    self.current_capital = self.initial_capital
-    obs = self.state_matrix[self.sample_indices[0]]
-    return obs, self._get_info()
-```
-- Réinitialise le portefeuille, le capital ($1\,000\,000\$$), et mélange l'ordre des dossiers si activé.
-- Retourne l'observation initiale $s_0$ et le dictionnaire d'informations `info`.
-
-#### 3. Étape de Transition (`step`) :
-```python
-def step(self, action: int):
-    # 1. Évaluation financière du dossier courant
-    outcome = calculate_financial_outcome(row, action, ...)
-    net_profit = outcome["net_profit"]
-    
-    # 2. Mise à jour du capital et statistiques
-    self.total_profit += net_profit
-    self.current_capital += net_profit
-    
-    # 3. Récompense normalisée
-    reward = float(net_profit * self.reward_scale)
-    self.current_step += 1
-    
-    # 4. Condition d'arrêt
-    terminated = (self.current_step >= self.max_steps) or (self.current_capital <= 0)
-    next_obs = self.state_matrix[self.sample_indices[self.current_step]] if not terminated else np.zeros(18)
-    
-    return next_obs, reward, terminated, False, self._get_info()
-```
-- Exécute l'action, calcule la récompense scalaire, passe à l'état suivant $s_{t+1}$ et vérifie la fin d'épisode.
+### 6.2 `src/preprocessing.py`
+La classe `CreditDataPreprocessor` prépare les variables pour l'agent :
+- Corrige les éventuelles valeurs négatives d'EAD.
+- Calcule les ratios financiers dérivés :
+  $$\text{Debt\_to\_Income\_Ratio} = \frac{\text{Mensualité du prêt}}{\text{Revenu mensuel}}$$
+  $$\text{Coverage\_Ratio} = \frac{\text{Valeur de garantie}}{\text{Montant demandé EAD}}$$
+- Encode les colonnes qualitatives (`Loan_Category`, `Employment_Status`) par One-Hot encoding.
+- Normalise les 12 features continues avec `StandardScaler` ($\mu=0, \sigma=1$) pour produire la matrice de tenseurs `(500, 18)`.
 
 ---
 
-### 5.5 `tests/test_environment.py`
-Vérifie la robustesse mathématique et la conformité Gymnasium via `pytest` :
-- `test_preprocessor` : Vérifie l'absence de valeurs `NaN` et la forme `(500, 18)`.
-- `test_gymnasium_env_compliance` : Appelle `check_env(env)` pour valider les normes officielles Gymnasium.
-- `test_env_step_and_reset` : Valide le cycle complet d'un épisode et la terminaison.
-- `test_default_probability_bounds` : Garantit que $P(\text{Défaut}) \in [0, 1]$ pour chaque client.
+### 6.3 `src/utils.py`
+1. `calculate_default_probability(row)` : Calibre la probabilité de défaut $P(\text{Défaut})$ via un modèle logistique tenant compte du Score FICO, du ratio DTI, du statut professionnel et du contexte macroéconomique.
+2. `calculate_financial_outcome(row, action, ...)` : Simule le remboursement avec marge d'intérêt nette ou le défaut avec saisie/décote du collatéral.
 
 ---
 
-### 5.6 `main.py`
-Exécute le workflow et compare trois politiques de décision sur les 500 dossiers :
-
-```python
-def evaluate_policy(policy_name: str, policy_fn):
-    obs, info = env.reset(seed=42)
-    terminated = False
-    while not terminated:
-        raw_row = env.processed_df.iloc[env.sample_indices[env.current_step]]
-        action = policy_fn(obs, raw_row)
-        obs, reward, terminated, truncated, info = env.step(action)
-    return info
-```
-
-Trois politiques sont testées :
-1. **Politique Naïve (Tout Approuver)** : `lambda obs, row: 1`
-2. **Politique Aléatoire (50/50)** : `lambda obs, row: rng.integers(0, 2)`
-3. **Politique Heuristique Experte** : Approuve si $\text{Score} \ge 580$ ET $\text{DTI} < 0.45$.
+### 6.4 `src/credit_mdp_env.py`
+Classe `CreditApprovalEnv(gym.Env)` conforme aux standards Gymnasium :
+- `observation_space` : `Box(-10.0, 10.0, (18,), float32)`.
+- `action_space` : `Discrete(2)` (`0 = Rejeter`, `1 = Approuver`).
+- `step(action)` : Calcule le résultat financier, met à jour le capital et renvoie $(s_{t+1}, r_t, \text{terminated}, \text{truncated}, \text{info})$.
 
 ---
 
-## 6. Résultats et Comparaison des Stratégies
+### 6.5 `src/ppo/networks.py`
+- `ActorNetwork` : MLP à 2 couches cachées de 64 neurones (`Tanh`) produisant les logits d'action discrète et instanciant une `torch.distributions.Categorical`.
+- `CriticNetwork` : MLP $(18 \to 64 \to 64 \to 1)$ estimant la valeur d'état $V(s)$.
+- `ActorCritic` : Module unifié avec initialisation orthogonale des poids (`nn.init.orthogonal_`).
 
-L'exécution de `main.py` donne le tableau comparatif suivant :
+---
 
-| Stratégie | Taux d'Approbation | Nombre de Défauts | Volume Prêté ($) | Profit Net Bancaire ($) | ROI (%) |
+### 6.6 `src/ppo/buffer.py`
+Classe `RolloutBuffer` :
+- Stocke les trajectoires $(s_t, a_t, \log \pi(a_t|s_t), r_t, d_t, V(s_t))$.
+- Calcule les avantages normalisés GAE-$\lambda$ et les retours cibles $R_t = \hat{A}_t + V(s_t)$.
+- Génère des mini-batches mélangés aléatoirement pour les $K$ époques d'apprentissage PPO.
+
+---
+
+### 6.7 `src/ppo/agent.py`
+Classe `PPOAgent` :
+- `select_action(state, deterministic=False)` : Sélectionne l'action stochastique en entraînement ou déterministe en inférence.
+- `update(buffer)` : Exécute $K=4$ époques de descente de gradient avec calcul de la perte PPO clippée, de la perte de valeur, du bonus d'entropie et du clipping de gradient (`max_grad_norm = 0.5`).
+- `save(filepath)` / `load(filepath)` : Persistance des poids PyTorch.
+
+---
+
+### 6.8 `src/train_ppo.py`
+- `train_ppo(env, agent, num_episodes=150, buffer_size=500, eval_interval=15)` :
+  - Orchestre la boucle d'interaction agent-environnement.
+  - Évalue régulièrement l'agent sur des épisodes de validation déterministes.
+  - Sauvegarde le meilleur modèle dans `models/best_ppo_agent.pt`.
+
+---
+
+### 6.9 `tests/test_environment.py` & `tests/test_ppo.py`
+Suite de tests unitaires complète validant :
+- La conformité Gymnasium via `check_env`.
+- Les dimensions des sorties de l'Actor et du Critic.
+- Le bon calcul du buffer GAE et l'absence de valeurs `NaN`.
+- Le cycle de sauvegarde et de chargement des poids.
+
+---
+
+### 6.10 `main.py`
+Script d'entrée exécutable avec options `--episodes` et `--retrain`. Il charge le dataset, instancie l'environnement, entraîne/charge l'agent PPO, et produit le tableau comparatif du benchmark face aux baselines.
+
+---
+
+## 7. Résultats et Comparaison Approfondie des Stratégies
+
+L'évaluation sur l'ensemble du portefeuille de 500 dossiers de demandes de crédit donne les résultats suivants :
+
+| Stratégie | Approbations | Défauts | Volume Prêté ($) | Profit Net ($) | ROI (%) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **1. Tout Approuver (Naïf)** | 500/500 (100.0%) | 375 (75.0%) | 24,888,053 $ | 4,294,743.06 $ | 17.26% |
 | **2. Aléatoire (50/50)** | 244/500 (48.8%) | 181 (74.2%) | 12,052,187 $ | 1,955,933.20 $ | 16.23% |
-| **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | **98.45%** |
+| **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | 98.45% |
+| **4. Agent PPO (Reinforcement Learning)** | **386/500 (77.2%)** | **277 (71.8%)** | **19,174,444 $** | **4,357,467.39 $** | **22.73%** |
 
-### Analyse des Résultats :
-- **Tout Approuver** : Génère un volume important mais subit $75\%$ de défauts. Le profit existe grâce aux taux élevés, mais le risque systémique pour la banque est critique.
-- **Heuristique Experte** : Aucun défaut ($0\%$) et un ROI exceptionnel ($98.45\%$), mais elle est **trop restrictive** (seuls 3 dossiers acceptés sur 500), ce qui représente un immense **manque à gagner** d'opportunités de prêt.
-- **Rôle du futur agent RL (DQN / PPO)** : Trouver l'équilibre parfait (la frontière efficiente de Pareto) entre le volume approuvé et la maîtrise du risque de défaut.
+### Analyse Comparative :
+1. **L'Approche Naïve (Tout Approuver)** génère un volume élevé mais accumule $75\%$ de défauts. Bien que profitable grâce aux taux élevés, elle expose la banque à un risque systémique majeur et immobilise $24.88\text{M}\$$ de capital.
+2. **L'Heuristique Experte** n'a aucun défaut ($0\%$) et un ROI de $98.45\%$, mais elle rejette $99.4\%$ des demandeurs, générant un énorme manque à gagner pour l'institution financière ($19\,570\$$ de profit seulement).
+3. **L'Agent PPO (RL)** réussit à trouver le **point d'équilibre optimal** :
+   - Il génère le **meilleur profit net absolu ($4\,357\,467.39\$$)**.
+   - Il engage **$5.7$ millions de dollars de capital en moins** par rapport au tout approuver.
+   - Son rendement des fonds prêtés (**ROI**) grimpe à **$22.73\%$** (+5.47 points par rapport à la politique naïve).
