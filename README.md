@@ -84,9 +84,15 @@ python data/download_data.py
 ```bash
 python main.py
 ```
-*Options disponibles : `python main.py --episodes 200 --retrain` pour relancer un entraînement complet.*
+*Options disponibles : `python main.py --episodes 150 --retrain` pour relancer un entraînement complet.*
 
-### 3. Lancer la Suite Complète de Tests Unitaires
+### 3. Lancer le Dashboard TensorBoard
+```bash
+tensorboard --logdir runs
+```
+*Ouvrez ensuite [http://localhost:6006](http://localhost:6006) pour visualiser en direct la Policy Loss, Value Loss, Entropy, Rewards, et Profits.*
+
+### 4. Lancer la Suite Complète de Tests Unitaires
 ```bash
 python -m pytest tests/
 ```

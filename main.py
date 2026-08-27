@@ -1,8 +1,9 @@
 """
-Script principal de demonstration complet (Etapes 1, 2 & 3) :
+Script principal de demonstration complet (Etapes 1, 2, 3 & 4) :
 - Etape 1 : Recuperation et pretraitement des donnees
 - Etape 2 : Instanciation du MDP (CreditApprovalEnv)
-- Etape 3 : Entrainement et Evaluation de l'agent PPO face aux strategies de reference (Baselines)
+- Etape 3 : Entrainement de l'agent PPO (Actor-Critic, GAE)
+- Etape 4 : Monitoring (TensorBoard, Losses, Rewards, Profits & Courbes visuelles)
 """
 
 import os
@@ -17,7 +18,12 @@ from src.ppo.agent import PPOAgent
 from src.train_ppo import train_ppo
 
 
-def run_full_pipeline(num_episodes: int = 150, force_retrain: bool = False):
+def run_full_pipeline(
+    num_episodes: int = 150,
+    force_retrain: bool = False,
+    use_tensorboard: bool = True,
+    experiment_name: str = None,
+):
     print("=" * 75)
     print(" PROJET RL : OPTIMISATION DE L'APPROBATION DES PRETS BANCAIRES")
     print("=" * 75)
@@ -45,9 +51,9 @@ def run_full_pipeline(num_episodes: int = 150, force_retrain: bool = False):
     print(f"     - Espace d'actions (A): {env.action_space} (0 = Rejeter, 1 = Approuver)")
 
     # -------------------------------------------------------------
-    # ETAPE 3 : Entrainement / Chargement de l'Agent PPO
+    # ETAPE 3 & 4 : Entrainement PPO & Monitoring
     # -------------------------------------------------------------
-    print("\n--- ETAPE 3 : Agent Reinforcement Learning (PPO) ---")
+    print("\n--- ETAPES 3 & 4 : Agent PPO et Monitoring ---")
     model_path = os.path.join("models", "best_ppo_agent.pt")
     
     agent = PPOAgent(
@@ -67,13 +73,16 @@ def run_full_pipeline(num_episodes: int = 150, force_retrain: bool = False):
         print(f"[INFO] Chargement du modele PPO pre-entraine : {model_path}")
         agent.load(model_path)
     else:
-        print(f"[INFO] Lancement de l'entrainement PPO ({num_episodes} episodes)...")
+        print(f"[INFO] Lancement de l'entrainement PPO ({num_episodes} episodes) avec Monitoring...")
         train_env = CreditApprovalEnv(data_path=data_path, shuffle_on_reset=True, seed=42)
         agent, _ = train_ppo(
             env=train_env,
             agent=agent,
             num_episodes=num_episodes,
             eval_interval=15,
+            use_tensorboard=use_tensorboard,
+            experiment_name=experiment_name,
+            reports_dir="reports",
             save_dir="models",
             save_name="best_ppo_agent.pt",
         )
@@ -128,7 +137,7 @@ def run_full_pipeline(num_episodes: int = 150, force_retrain: bool = False):
         lambda obs, row: 1 if (row["Risk_Score"] >= 580 and row.get("Debt_to_Income_Ratio", 0.5) < 0.45) else 0
     ))
 
-    # 4. Agent PPO Entraine (Deterministe)
+    # 4. Agent PPO Entraine
     results.append(evaluate_policy(
         "4. Agent PPO (Reinforcement Learning)",
         lambda obs, row: agent.select_action(obs, deterministic=True)[0]
@@ -137,7 +146,9 @@ def run_full_pipeline(num_episodes: int = 150, force_retrain: bool = False):
     results_df = pd.DataFrame(results)
     print("\n" + results_df.to_string(index=False))
     print("\n" + "=" * 75)
-    print(" L'agent PPO a ete entraine et evalue avec succes !")
+    print(" [MONITORING INFO] Pour visualiser le dashboard TensorBoard en direct :")
+    print("     tensorboard --logdir runs")
+    print(" Graphiques sauvegardes dans : reports/learning_curves.png")
     print("=" * 75)
 
 
@@ -145,6 +156,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Projet RL - Approbation de prêts")
     parser.add_argument("--episodes", type=int, default=150, help="Nombre d'episodes d'entrainement PPO")
     parser.add_argument("--retrain", action="store_true", help="Forcer le re-entrainement du modele PPO")
+    parser.add_argument("--no_tensorboard", action="store_true", help="Desactiver TensorBoard")
+    parser.add_argument("--name", type=str, default=None, help="Nom de l'experience pour le logging")
     args = parser.parse_args()
 
-    run_full_pipeline(num_episodes=args.episodes, force_retrain=args.retrain)
+    run_full_pipeline(
+        num_episodes=args.episodes,
+        force_retrain=args.retrain,
+        use_tensorboard=not args.no_tensorboard,
+        experiment_name=args.name,
+    )

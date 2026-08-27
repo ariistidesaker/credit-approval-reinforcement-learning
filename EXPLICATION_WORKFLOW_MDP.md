@@ -225,7 +225,39 @@ Script d'entrée exécutable avec options `--episodes` et `--retrain`. Il charge
 
 ---
 
-## 7. Résultats et Comparaison Approfondie des Stratégies
+## 8. Système de Monitoring (TensorBoard & Visualisation)
+
+Le module [`src/monitoring.py`](src/monitoring.py) implémente la classe `TrainingLogger` pour un suivi transparent en temps réel :
+
+### 8.1 Métriques Journalisées dans TensorBoard
+1. **Convergence & Pertes d'Optimisation** :
+   - `Loss/Policy_Loss` : Perte de politique clippée PPO ($L^{\text{CLIP}}$).
+   - `Loss/Value_Loss` : Erreur quadratique de la fonction de valeur du Critic ($L^{VF}$).
+   - `Loss/Entropy` : Mesure de la diversité d'exploration stochastique.
+   - `Loss/Approx_KL` : Divergence de Kullback-Leibler pour surveiller la stabilité de la mise à jour.
+2. **Dynamique des Récompenses** :
+   - `Reward/Episode_Reward` : Récompense cumulée par épisode.
+   - `Reward/Rolling_Mean_10_Reward` : Moyenne mobile lissée sur 10 épisodes.
+3. **Indicateurs Métier & Risque Bancaire** :
+   - `Financial/Total_Profit` : Profit net cumulé de la banque ($).
+   - `Financial/Approval_Rate` : Taux de dossiers accordés (%).
+   - `Financial/Default_Rate` : Taux de défauts constatés parmi les dossiers accordés (%).
+   - `Financial/ROI` : Retour sur capital prêté.
+   - `Financial/Volume_Lent` : Volume total de crédit octroyé ($).
+
+### 8.2 Commandes pour Visualiser TensorBoard
+```bash
+tensorboard --logdir runs
+```
+L'interface est alors accessible dans votre navigateur à l'adresse : `http://localhost:6006/`.
+
+### 8.3 Tableaux de Bord Automatiques (`reports/`)
+- `reports/learning_curves.png` : Graphique multi-panneaux haute résolution généré automatiquement à la fin de chaque entraînement.
+- `reports/training_history.csv` : Export tabulaire de toutes les métriques pour analyses statistiques ultérieures.
+
+---
+
+## 9. Résultats et Comparaison Approfondie des Stratégies
 
 L'évaluation sur l'ensemble du portefeuille de 500 dossiers de demandes de crédit donne les résultats suivants :
 
@@ -234,12 +266,12 @@ L'évaluation sur l'ensemble du portefeuille de 500 dossiers de demandes de cré
 | **1. Tout Approuver (Naïf)** | 500/500 (100.0%) | 375 (75.0%) | 24,888,053 $ | 4,294,743.06 $ | 17.26% |
 | **2. Aléatoire (50/50)** | 244/500 (48.8%) | 181 (74.2%) | 12,052,187 $ | 1,955,933.20 $ | 16.23% |
 | **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | 98.45% |
-| **4. Agent PPO (Reinforcement Learning)** | **386/500 (77.2%)** | **277 (71.8%)** | **19,174,444 $** | **4,357,467.39 $** | **22.73%** |
+| **4. Agent PPO (Reinforcement Learning)** | **352/500 (70.4%)** | **248 (70.5%)** | **17,892,166 $** | **4,340,909.49 $** | **24.26%** |
 
 ### Analyse Comparative :
 1. **L'Approche Naïve (Tout Approuver)** génère un volume élevé mais accumule $75\%$ de défauts. Bien que profitable grâce aux taux élevés, elle expose la banque à un risque systémique majeur et immobilise $24.88\text{M}\$$ de capital.
 2. **L'Heuristique Experte** n'a aucun défaut ($0\%$) et un ROI de $98.45\%$, mais elle rejette $99.4\%$ des demandeurs, générant un énorme manque à gagner pour l'institution financière ($19\,570\$$ de profit seulement).
 3. **L'Agent PPO (RL)** réussit à trouver le **point d'équilibre optimal** :
-   - Il génère le **meilleur profit net absolu ($4\,357\,467.39\$$)**.
-   - Il engage **$5.7$ millions de dollars de capital en moins** par rapport au tout approuver.
-   - Son rendement des fonds prêtés (**ROI**) grimpe à **$22.73\%$** (+5.47 points par rapport à la politique naïve).
+   - Il génère un profit net supérieur (**$4\,340\,909.49\$$**) à la politique naïve.
+   - Il engage **$7.0$ millions de dollars de capital en moins** ($17.89\text{M}\$$ contre $24.88\text{M}\$$).
+   - Son rendement des fonds prêtés (**ROI**) grimpe à **$24.26\%$** (+7.00 points par rapport à la politique naïve).

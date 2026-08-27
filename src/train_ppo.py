@@ -2,11 +2,12 @@ import os
 import time
 import numpy as np
 import pandas as pd
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 
 from src.credit_mdp_env import CreditApprovalEnv
 from src.ppo.agent import PPOAgent
 from src.ppo.buffer import RolloutBuffer
+from src.monitoring import TrainingLogger
 
 
 def evaluate_agent(env: CreditApprovalEnv, agent: PPOAgent, num_episodes: int = 5) -> Dict[str, float]:
@@ -49,13 +50,17 @@ def train_ppo(
     agent: Optional[PPOAgent] = None,
     num_episodes: int = 150,
     buffer_size: int = 500,
-    eval_interval: int = 10,
+    eval_interval: int = 15,
+    use_tensorboard: bool = True,
+    log_dir: str = "runs",
+    experiment_name: Optional[str] = None,
+    reports_dir: str = "reports",
     save_dir: str = "models",
     save_name: str = "best_ppo_agent.pt",
     seed: int = 42,
 ) -> Tuple[PPOAgent, pd.DataFrame]:
     """
-    Fonction d'entraînement de l'agent PPO sur l'environnement d'octroi de crédits.
+    Fonction d'entraînement de l'agent PPO avec monitoring complet (TensorBoard, Losses, Rewards & Métriques Métier).
     """
     if env is None:
         env = CreditApprovalEnv(data_path="data/synthetic_sadc_lgd_dataset.csv", seed=seed)
@@ -76,14 +81,14 @@ def train_ppo(
         )
 
     buffer = RolloutBuffer(buffer_size=buffer_size, state_dim=env.observation_space.shape[0], device=agent.device)
+    logger = TrainingLogger(log_dir=log_dir, experiment_name=experiment_name, use_tensorboard=use_tensorboard)
 
     best_profit = -np.inf
-    history: List[Dict[str, Any]] = []
     best_model_path = os.path.join(save_dir, save_name)
 
-    print("=" * 70)
-    print(f" [ENTRAINEMENT PPO] - {num_episodes} Épisodes | Buffer Size: {buffer_size}")
-    print("=" * 70)
+    print("=" * 75)
+    print(f" [ENTRAINEMENT PPO & MONITORING] - {num_episodes} Épisodes | Buffer Size: {buffer_size}")
+    print("=" * 75)
 
     start_time = time.time()
 
@@ -91,6 +96,7 @@ def train_ppo(
         obs, info = env.reset(seed=seed + episode)
         terminated = False
         ep_reward = 0.0
+        update_stats = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0, "approx_kl": 0.0}
 
         while not terminated:
             # 1. Sélection de l'action stochastique
@@ -114,7 +120,6 @@ def train_ppo(
 
             # 4. Si le buffer est plein ou si l'épisode est terminé, mise à jour PPO
             if buffer.full or (terminated and buffer.ptr > 0):
-                # Estimation de la valeur de l'état suivant
                 if terminated:
                     last_val = 0.0
                 else:
@@ -130,24 +135,10 @@ def train_ppo(
                 update_stats = agent.update(buffer)
                 buffer.clear()
 
-        # Enregistrement de l'historique
-        ep_stats = {
-            "episode": episode,
-            "ep_reward": ep_reward,
-            "total_profit": info["total_profit"],
-            "approval_rate": info["approval_rate"],
-            "default_rate": info["default_rate"],
-            "volume_lent": info["total_volume_lent"],
-            "roi": info["roi"],
-            "policy_loss": update_stats.get("policy_loss", 0.0),
-            "value_loss": update_stats.get("value_loss", 0.0),
-            "entropy": update_stats.get("entropy", 0.0),
-        }
-
         # Évaluation périodique
+        eval_metrics = None
         if episode % eval_interval == 0 or episode == num_episodes:
             eval_metrics = evaluate_agent(env, agent, num_episodes=5)
-            ep_stats.update(eval_metrics)
 
             print(
                 f"Ep {episode:03d}/{num_episodes:03d} | "
@@ -164,14 +155,35 @@ def train_ppo(
                 agent.save(best_model_path)
                 print(f"  [+] Nouveau Meilleur Modèle Sauvegardé : {best_model_path} (Profit: {best_profit:,.2f}$)")
 
-        history.append(ep_stats)
+        # Enregistrement dans le Logger (TensorBoard + Historique interne)
+        logger.log_episode(
+            episode=episode,
+            ep_reward=ep_reward,
+            total_profit=info["total_profit"],
+            approval_rate=info["approval_rate"],
+            default_rate=info["default_rate"],
+            volume_lent=info["total_volume_lent"],
+            roi=info["roi"],
+            policy_loss=update_stats.get("policy_loss", 0.0),
+            value_loss=update_stats.get("value_loss", 0.0),
+            entropy=update_stats.get("entropy", 0.0),
+            approx_kl=update_stats.get("approx_kl", 0.0),
+            eval_metrics=eval_metrics,
+        )
 
     elapsed = time.time() - start_time
-    print("-" * 70)
-    print(f" [FIN ENTRAINEMENT] Temps total : {elapsed:.2f}s | Meilleur Profit Évalué : {best_profit:,.2f}$")
-    print("=" * 70)
+    print("-" * 75)
+    print(f" [FIN ENTRAINEMENT] Temps : {elapsed:.2f}s | Meilleur Profit Évalué : {best_profit:,.2f}$")
+    print("=" * 75)
 
-    history_df = pd.DataFrame(history)
+    # Export des graphiques et du fichier CSV
+    plot_path = os.path.join(reports_dir, "learning_curves.png")
+    csv_path = os.path.join(reports_dir, "training_history.csv")
+    logger.plot_learning_curves(save_path=plot_path)
+    logger.export_csv(save_path=csv_path)
+    logger.close()
+
+    history_df = pd.DataFrame(logger.history)
     return agent, history_df
 
 
