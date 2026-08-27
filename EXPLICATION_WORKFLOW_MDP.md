@@ -1,48 +1,41 @@
-# Guide Explicatif Complet : Workflow, MDP, Architecture PPO & Analyse Détaillée du Code
+# Guide Explicatif Complet : Workflow, MDP, Architecture PPO, Monitoring & Déploiement Streamlit
 
-Ce document détaille le fonctionnement global du projet, explique les fondements théoriques et pratiques du **Processus de Décision Markovien (MDP)**, et fournit une **explication exhaustive du code** implémenté pour l'optimisation de l'approbation de prêts bancaires par Reinforcement Learning (**Proximal Policy Optimization - PPO**).
+Ce document constitue la documentation de référence du projet. Il détaille le fonctionnement global du système, explique les fondements théoriques et mathématiques du **Processus de Décision Markovien (MDP)**, et fournit une **explication exhaustive des 5 étapes du workflow** pour l'optimisation de l'approbation de prêts bancaires par Reinforcement Learning (**PPO - Proximal Policy Optimization**).
 
 ---
 
 ## Sommaire
-1. [Contexte & Problématique Métier](#1-contexte--problématique-métier)
+1. [Contexte Métier : Du Scoring Supervisé au Reinforcement Learning](#1-contexte-métier--du-scoring-supervisé-au-reinforcement-learning)
 2. [Qu'est-ce qu'un MDP (Markov Decision Process) ?](#2-quest-ce-quun-mdp-markov-decision-process-)
-3. [Modélisation Mathématique du MDP de Crédit](#3-modélisation-mathématique-du-mdp-de-crédit)
-4. [Schéma Global du Workflow](#4-schéma-global-du-workflow)
-5. [Théorie & Algorithme PPO (Proximal Policy Optimization)](#5-théorie--algorithme-ppo-proximal-policy-optimization)
-6. [Explication Ligne par Ligne / Bloc par Bloc du Code](#6-explication-détaillée-du-code-source)
-   - [6.1 data/download_data.py (Téléchargement Kaggle)](#61-datadownload_datapy)
-   - [6.2 src/preprocessing.py (Feature Engineering & Encodage)](#62-srcpreprocessingpy)
-   - [6.3 src/utils.py (Modélisation Financière & Défaut)](#63-srcutilspy)
-   - [6.4 src/credit_mdp_env.py (Environnement MDP Gymnasium)](#64-srccredit_mdp_envpy)
-   - [6.5 src/ppo/networks.py (Réseaux Actor-Critic)](#65-srcpponetworkspy)
-   - [6.6 src/ppo/buffer.py (RolloutBuffer & GAE-λ)](#66-srcppobufferpy)
-   - [6.7 src/ppo/agent.py (Agent PPO & Perte Clippée)](#67-srcppoagentpy)
-   - [6.8 src/train_ppo.py (Boucle d'Entraînement & Checkpoint)](#68-srctrain_ppopy)
-   - [6.9 tests/test_environment.py & tests/test_ppo.py (Tests Unitaires)](#69-teststest_environmentpy--teststest_ppopy)
-   - [6.10 main.py (Pipeline Global & Benchmark)](#610-mainpy)
-8. [Système de Monitoring (TensorBoard & Visualisation)](#8-système-de-monitoring-tensorboard--visualisation)
-9. [Déploiement Web Interactif avec Streamlit (app.py)](#9-déploiement-web-interactif-avec-streamlit-apppy)
-10. [Résultats et Comparaison Approfondie des Stratégies](#10-résultats-et-comparaison-approfondie-des-stratégies)
+3. [Modélisation Mathématique du MDP de Crédit Bancaire](#3-modélisation-mathématique-du-mdp-de-crédit-bancaire)
+4. [Schéma Global du Workflow du Projet (Étapes 1 à 5)](#4-schéma-global-du-workflow-du-projet-étapes-1-à-5)
+5. [Explication Détaillée des 5 Étapes du Workflow](#5-explication-détaillée-des-5-étapes-du-workflow)
+   - [Étape 1 : Ingestion & Stockage des Données (data/download_data.py)](#étape-1--ingestion--stockage-des-données-datadownload_datapy)
+   - [Étape 2 : Feature Engineering & Construction du MDP (src/preprocessing.py, src/utils.py, src/credit_mdp_env.py)](#étape-2--feature-engineering--construction-du-mdp-srcpreprocessingpy-srcutilspy-srccredit_mdp_envpy)
+   - [Étape 3 : Algorithme PPO & Architecture Actor-Critic (src/ppo/, src/train_ppo.py)](#étape-3--algorithme-ppo--architecture-actor-critic-srcppo-srctrain_ppopy)
+   - [Étape 4 : Système de Monitoring & Visualisation (src/monitoring.py, TensorBoard, reports/)](#étape-4--système-de-monitoring--visualisation-srcmonitoringpy-tensorboard-reports)
+   - [Étape 5 : Déploiement de l'Application Web Interactive Streamlit (app.py)](#étape-5--déploiement-de-lapplication-web-interactive-streamlit-apppy)
+6. [Suite de Tests & Validation Automatisée](#6-suite-de-tests--validation-automatisée)
+7. [Résultats Comparatifs & Analyse Financière](#7-résultats-comparatifs--analyse-financière)
 
 ---
 
-## 1. Contexte & Problématique Métier
+## 1. Contexte Métier : Du Scoring Supervisé au Reinforcement Learning
 
-Dans le secteur bancaire classique, l'octroi de crédits est traditionnellement abordé comme un problème de **Machine Learning supervisé** (classification binaire) :
+Dans le secteur bancaire classique, l'octroi de crédits est traditionnellement modélisé comme un problème de **Machine Learning supervisé** (classification binaire) :
 > *« Prédire si la probabilité de défaut $P(\text{Défaut}) > \text{seuil}$. »*
 
 ### Les limites de l'approche supervisée :
 1. **Absence d'optimisation financière globale** : Un client avec un risque modéré ($20\%$ de chance de défaut) mais demandant un prêt important avec un taux d'intérêt rémunérateur et une bonne garantie collatérale (*Asset Coverage*) peut générer un profit net bien supérieur à un client à risque quasi-nul demandant un petit montant.
 2. **Gestion de contraintes de portefeuille** : Une banque opère avec un capital limité, des coûts de refinancement (*Cost of Funds*), et des limites de tolérance au risque sur l'ensemble de son portefeuille.
-3. **Le Reinforcement Learning (RL)** permet à un agent d'apprendre directement une **stratégie décisionnelle optimale séquentielle** maximisant le profit cumulé à long terme tout en maîtrisant les pertes par défaut.
+3. **L'approche par Reinforcement Learning (RL)** permet à un agent d'apprendre une **stratégie séquentielle optimale** en interagissant avec un environnement simulant le marché du crédit, afin de maximiser le profit financier net cumulé tout en maîtrisant les risques de perte par défaut (*LGD - Loss Given Default*).
 
 ---
 
 ## 2. Qu'est-ce qu'un MDP (Markov Decision Process) ?
 
 ### 2.1 Définition Formelle
-Un **MDP** est le formalisme mathématique universel pour modéliser la prise de décision séquentielle d'un agent autonome dans un environnement dynamique.
+Un **MDP** est le formalisme mathématique universel pour modéliser la prise de décision séquentielle d'un agent autonome dans un environnement dynamique et stochastique.
 
 Un MDP est défini par le 5-uplet :
 $$\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma \rangle$$
@@ -50,7 +43,7 @@ $$\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gam
 - **$\mathcal{S}$ (Espace des États - State Space)** : L'ensemble de toutes les informations observables par l'agent à l'instant $t$.
 - **$\mathcal{A}$ (Espace des Actions - Action Space)** : L'ensemble des actions discrètes ou continues disponibles.
 - **$\mathcal{P}(s' \mid s, a)$ (Fonction de Transition)** : La probabilité que l'environnement passe à l'état $s'$ après que l'agent a exécuté l'action $a$ dans l'état $s$.
-- **$\mathcal{R}(s, a)$ (Fonction de Récompense - Reward Function)** : Le signal scalaire immédiat reçu par l'agent, quantifiant la qualité de sa décision.
+- **$\mathcal{R}(s, a)$ (Fonction de Récompense - Reward Function)** : Le signal scalaire immédiat reçu par l'agent, quantifiant la qualité économique de sa décision.
 - **$\gamma \in [0, 1]$ (Facteur d'actualisation - Discount Factor)** : Pondère l'importance des gains futurs par rapport aux gains immédiats.
 
 ### 2.2 La Propriété de Markov
@@ -59,7 +52,7 @@ $$\mathbb{P}(S_{t+1} = s' \mid S_t = s_t, A_t = a_t, S_{t-1}, A_{t-1}, \dots) = 
 
 ---
 
-## 3. Modélisation Mathématique du MDP de Crédit
+## 3. Modélisation Mathématique du MDP de Crédit Bancaire
 
 Le processus décisionnel séquentiel est modélisé par l'interaction entre l'institution bancaire (l'environnement MDP) et l'agent intelligent (l'Actor-Critic PPO) :
 
@@ -109,7 +102,7 @@ flowchart TD
 ```
 
 ### 3.1 Espace des États ($\mathcal{S} \in \mathbb{R}^{18}$)
-Chaque état représente un dossier de demande de prêt composé de 18 variables numériques normalisées :
+Chaque état représente un dossier de demande de crédit composé de 18 variables normalisées :
 1. `Risk_Score` : Score de crédit FICO (300 à 850).
 2. `Applicant_Age` : Âge du demandeur.
 3. `Household_Income` : Revenu annuel du ménage.
@@ -117,7 +110,7 @@ Chaque état représente un dossier de demande de prêt composé de 18 variables
 5. `Asset_Coverage_Value` : Valeur du collatéral / actif en garantie.
 6. `Lending_Rate_Percent` : Taux d'intérêt annuel appliqué au prêt.
 7. `Loan_Duration_Months` : Durée du prêt en mois.
-8. `GDP_Growth_Percent` : Taux de croissance du PIB (climat macroéconomique).
+8. `GDP_Growth_Percent` : Taux de croissance du PIB.
 9. `Inflation_Rate_Percent` : Taux d'inflation.
 10. `Policy_Rate_Percent` : Taux directeur de la banque centrale.
 11. `Debt_to_Income_Ratio` : Ratio $\frac{\text{Mensualité estimée}}{\text{Revenu mensuel}}$.
@@ -138,13 +131,11 @@ Chaque état représente un dossier de demande de prêt composé de 18 variables
 - Si $a = 1$ (Approbation) :
   - **Sans défaut** : $\text{Gain} = \text{EAD} \times (r_{\text{prêt}} - r_{\text{fonds}}) \times \frac{\text{Durée}}{12}$
   - **Avec défaut** : $\text{Perte} = - \left(\text{EAD} \times \text{LGD} - \text{Collatéral} \times \text{Décote}\right)_+$
-- **Mise à l'échelle** : $r_t = \text{Profit Net} \times 10^{-4}$ (pour stabiliser l'apprentissage par réseau de neurones).
+- **Mise à l'échelle** : $r_t = \text{Profit Net} \times 10^{-4}$ (pour stabiliser l'apprentissage par gradient de politique).
 
 ---
 
 ## 4. Schéma Global du Workflow du Projet (Étapes 1 à 5)
-
-L'architecture de bout en bout du projet intègre l'ensemble du cycle de vie RL, depuis l'ingestion des données jusqu'au déploiement interactif :
 
 ```mermaid
 flowchart TD
@@ -200,162 +191,150 @@ flowchart TD
 
 ---
 
-## 5. Théorie & Algorithme PPO (Proximal Policy Optimization)
+## 5. Explication Détaillée des 5 Étapes du Workflow
 
-PPO est un algorithme de type **Policy Gradient Actor-Critic** qui garantit des mises à jour stables sans déstabiliser la politique.
+### Étape 1 : Ingestion & Stockage des Données (`data/download_data.py`)
 
-### 5.1 Objectif Clippé (*Clipped Surrogate Objective*)
-Pour éviter des mises à jour destructives de la politique $\pi_\theta$, PPO restreint le ratio de probabilité $r_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_{\text{old}}}(a_t \mid s_t)}$ dans un intervalle $[1-\epsilon, 1+\epsilon]$ (avec $\epsilon = 0.2$) :
+#### Rôle & Objectif :
+Garantir la reproductibilité du projet en automatisant le téléchargement du dataset public Kaggle `zvikomborerocmufari/southern-african-banks-lgd-data-simulation` et sa copie locale sous `data/synthetic_sadc_lgd_dataset.csv`.
 
-$$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]$$
-
-### 5.2 Generalized Advantage Estimation (GAE-$\lambda$)
-L'avantage $\hat{A}_t$ mesure combien l'action choisie a été meilleure que l'action moyenne estimée par la fonction de valeur $V_\phi(s)$ :
-
-$$\delta_t^V = r_t + \gamma V_\phi(s_{t+1}) (1 - d_t) - V_\phi(s_t)$$
-$$\hat{A}_t^{\text{GAE}(\gamma, \lambda)} = \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}^V$$
-
-### 5.3 Fonction de Perte Globale
-$$L^{\text{total}}(\theta, \phi) = - L^{\text{CLIP}}(\theta) + c_1 L^{VF}(\phi) - c_2 S[\pi_\theta](s_t)$$
-- $L^{VF}(\phi) = \frac{1}{2} \hat{\mathbb{E}}_t \left[ (V_\phi(s_t) - R_t)^2 \right]$ : Erreur quadratique du Critic.
-- $S[\pi_\theta](s_t)$ : Entropie de la politique pour encourager l'exploration ($c_2 = 0.01$).
-
----
-
-## 6. Explication Détaillée du Code Source
-
-### 6.1 `data/download_data.py`
-Téléchargement automatisé du dataset Kaggle `zvikomborerocmufari/southern-african-banks-lgd-data-simulation` sans token requis via `kagglehub` et copie dans `data/synthetic_sadc_lgd_dataset.csv`.
+#### Analyse du Code :
+```python
+def download_and_save_data(target_dir: str = "data") -> str:
+    target_path = os.path.join(target_dir, TARGET_FILENAME)
+    if os.path.exists(target_path):
+        return target_path # Évite le re-téléchargement si déjà présent
+    download_dir = kagglehub.dataset_download(DATASET_IDENTIFIER)
+    shutil.copy(source_file, target_path)
+    return target_path
+```
+- **Sécurité & Automatisation** : Utilise `kagglehub` qui télécharge directement les datasets publics sans clé d'API manuelle.
+- **Persistance locale** : 500 dossiers clients avec 13 attributs financiers et macroéconomiques.
 
 ---
 
-### 6.2 `src/preprocessing.py`
+### Étape 2 : Feature Engineering & Construction du MDP (`src/preprocessing.py`, `src/utils.py`, `src/credit_mdp_env.py`)
+
+#### 1. Prétraitement & Ingénierie des Caractéristiques (`src/preprocessing.py`) :
 La classe `CreditDataPreprocessor` prépare les variables pour l'agent :
-- Corrige les éventuelles valeurs négatives d'EAD.
-- Calcule les ratios financiers dérivés :
+- **Correction des anomalies** : Bornage d'EAD ($> 1000\$$), du score FICO ($[300, 850]$) et de la LGD ($[0, 1]$).
+- **Ratios financiers dérivés** :
   $$\text{Debt\_to\_Income\_Ratio} = \frac{\text{Mensualité du prêt}}{\text{Revenu mensuel}}$$
-  $$\text{Coverage\_Ratio} = \frac{\text{Valeur de garantie}}{\text{Montant demandé EAD}}$$
-- Encode les colonnes qualitatives (`Loan_Category`, `Employment_Status`) par One-Hot encoding.
-- Normalise les 12 features continues avec `StandardScaler` ($\mu=0, \sigma=1$) pour produire la matrice de tenseurs `(500, 18)`.
+  $$\text{Coverage\_Ratio} = \frac{\text{Valeur de garantie Collatéral}}{\text{Montant demandé EAD}}$$
+- **Encodage & Normalisation** : `OneHotEncoder` pour les catégories (`Loan_Category`, `Employment_Status`) et `StandardScaler` pour les 12 variables continues, produisant une matrice d'état de dimension `(500, 18)`.
 
----
+#### 2. Modélisation du Risque et Calcul Financier (`src/utils.py`) :
+- `calculate_default_probability(row)` : Calibre la probabilité de défaut $P(\text{Défaut})$ via un modèle logistique :
+  $$\text{logit} = -1.2 - 1.5 \left(\frac{\text{Score} - 580}{100}\right) + 1.5 \max(0, \text{DTI} - 0.4) + \text{Pénalité Emploi} + \text{Stress Macro}$$
+  $$P(\text{Défaut}) = \frac{1}{1 + e^{-\text{logit}}}$$
+- `calculate_financial_outcome(row, action, ...)` : Simule le tirage aléatoire de Bernoulli pour déterminer le remboursement ou le défaut, calculant la marge d'intérêt nette ou la perte résiduelle après liquidation du collatéral (décote de 20%).
 
-### 6.3 `src/utils.py`
-1. `calculate_default_probability(row)` : Calibre la probabilité de défaut $P(\text{Défaut})$ via un modèle logistique tenant compte du Score FICO, du ratio DTI, du statut professionnel et du contexte macroéconomique.
-2. `calculate_financial_outcome(row, action, ...)` : Simule le remboursement avec marge d'intérêt nette ou le défaut avec saisie/décote du collatéral.
-
----
-
-### 6.4 `src/credit_mdp_env.py`
-Classe `CreditApprovalEnv(gym.Env)` conforme aux standards Gymnasium :
+#### 3. Environnement MDP Gymnasium (`src/credit_mdp_env.py`) :
+La classe `CreditApprovalEnv(gym.Env)` implémente l'interface standard :
 - `observation_space` : `Box(-10.0, 10.0, (18,), float32)`.
 - `action_space` : `Discrete(2)` (`0 = Rejeter`, `1 = Approuver`).
-- `step(action)` : Calcule le résultat financier, met à jour le capital et renvoie $(s_{t+1}, r_t, \text{terminated}, \text{truncated}, \text{info})$.
+- `reset()` : Initialise le capital bancaire ($1\,000\,000\$$) et mélange l'ordre des dossiers.
+- `step(action)` : Applique la décision, met à jour le capital et renvoie $(s_{t+1}, r_t, \text{terminated}, \text{truncated}, \text{info})$.
 
 ---
 
-### 6.5 `src/ppo/networks.py`
-- `ActorNetwork` : MLP à 2 couches cachées de 64 neurones (`Tanh`) produisant les logits d'action discrète et instanciant une `torch.distributions.Categorical`.
-- `CriticNetwork` : MLP $(18 \to 64 \to 64 \to 1)$ estimant la valeur d'état $V(s)$.
-- `ActorCritic` : Module unifié avec initialisation orthogonale des poids (`nn.init.orthogonal_`).
+### Étape 3 : Algorithme PPO & Architecture Actor-Critic (`src/ppo/`, `src/train_ppo.py`)
+
+PPO (*Proximal Policy Optimization*) est un algorithme Actor-Critic sur politique (*on-policy*) qui assure une optimisation stable grâce au **Clipping de l'objectif de substitution**.
+
+#### 1. Réseaux de Neurones (`src/ppo/networks.py`) :
+- **Actor Network** : MLP $(18 \to 64 \to 64 \to 2)$ avec activation `Tanh` et initialisation orthogonale des poids, produisant les logits d'une distribution `Categorical`.
+- **Critic Network** : MLP $(18 \to 64 \to 64 \to 1)$ estimant la fonction de valeur d'état $V_\phi(s)$.
+- **Module `ActorCritic`** : Unifie l'inférence pour générer conjointement action, log-probabilité, valeur d'état et entropie.
+
+#### 2. Rollout Buffer & GAE (`src/ppo/buffer.py`) :
+- Stocke les trajectoires d'interaction $(s_t, a_t, \log \pi(a_t|s_t), r_t, d_t, V(s_t))$.
+- Calcule les avantages par **Generalized Advantage Estimation** (GAE-$\lambda$) :
+  $$\delta_t^V = r_t + \gamma V_\phi(s_{t+1}) (1 - d_t) - V_\phi(s_t)$$
+  $$\hat{A}_t = \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}^V$$
+- Normalise les avantages et génère des mini-batches mélangés aléatoirement.
+
+#### 3. Agent PPO & Descente de Gradient (`src/ppo/agent.py`) :
+- Calcule la perte clippée avec $\epsilon = 0.2$ :
+  $$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]$$
+- Calcule la perte de valeur du Critic $L^{VF}(\phi) = \frac{1}{2} \hat{\mathbb{E}}_t [(V_\phi(s_t) - R_t)^2]$ et le bonus d'entropie $S[\pi_\theta]$.
+- Applique le gradient clipping (`max_grad_norm = 0.5`) avec l'optimiseur Adam ($\text{lr} = 3 \times 10^{-4}$).
+
+#### 4. Entraînement (`src/train_ppo.py`) :
+- Boucle d'entraînement sur 150 épisodes avec évaluations périodiques déterministes.
+- Sauvegarde automatique des poids du modèle optimal dans `models/best_ppo_agent.pt`.
 
 ---
 
-### 6.6 `src/ppo/buffer.py`
-Classe `RolloutBuffer` :
-- Stocke les trajectoires $(s_t, a_t, \log \pi(a_t|s_t), r_t, d_t, V(s_t))$.
-- Calcule les avantages normalisés GAE-$\lambda$ et les retours cibles $R_t = \hat{A}_t + V(s_t)$.
-- Génère des mini-batches mélangés aléatoirement pour les $K$ époques d'apprentissage PPO.
+### Étape 4 : Système de Monitoring & Visualisation (`src/monitoring.py`, TensorBoard, `reports/`)
 
----
+#### 1. Logger Unifié (`TrainingLogger`) :
+Le module [`src/monitoring.py`](file:///c:/Users/ariis/OneDrive/Documents/Cours%20DIT/Reinforcement%20Learning/groupe-5-proejt/src/monitoring.py) journalise simultanément :
+- **Métriques d'Optimisation RL** : Policy Loss, Value Loss, Entropie, Divergence Approx KL.
+- **Dynamique des Récompenses** : Récompense brute par épisode et moyenne mobile lissée sur 10 épisodes.
+- **Indicateurs Métier Bancaires** : Profit Net Cumulé ($), Taux d'Approbation (%), Taux de Défaut (%), ROI (%) et Volume Prêté ($).
 
-### 6.7 `src/ppo/agent.py`
-Classe `PPOAgent` :
-- `select_action(state, deterministic=False)` : Sélectionne l'action stochastique en entraînement ou déterministe en inférence.
-- `update(buffer)` : Exécute $K=4$ époques de descente de gradient avec calcul de la perte PPO clippée, de la perte de valeur, du bonus d'entropie et du clipping de gradient (`max_grad_norm = 0.5`).
-- `save(filepath)` / `load(filepath)` : Persistance des poids PyTorch.
+#### 2. Tableau de Bord Graphique Automatique (`reports/learning_curves.png`) :
+Génère à chaque entraînement une figure multi-panneaux haute résolution comprenant :
+1. *Convergence des Pertes (Losses)*
+2. *Évolution de la Récompense RL*
+3. *Profit Net Bancaire Cumulé ($)*
+4. *Gestion du Risque : Taux d'Approbation vs Taux de Défaut*
 
----
-
-### 6.8 `src/train_ppo.py`
-- `train_ppo(env, agent, num_episodes=150, buffer_size=500, eval_interval=15)` :
-  - Orchestre la boucle d'interaction agent-environnement.
-  - Évalue régulièrement l'agent sur des épisodes de validation déterministes.
-  - Sauvegarde le meilleur modèle dans `models/best_ppo_agent.pt`.
-
----
-
-### 6.9 `tests/test_environment.py` & `tests/test_ppo.py`
-Suite de tests unitaires complète validant :
-- La conformité Gymnasium via `check_env`.
-- Les dimensions des sorties de l'Actor et du Critic.
-- Le bon calcul du buffer GAE et l'absence de valeurs `NaN`.
-- Le cycle de sauvegarde et de chargement des poids.
-
----
-
-### 6.10 `main.py`
-Script d'entrée exécutable avec options `--episodes` et `--retrain`. Il charge le dataset, instancie l'environnement, entraîne/charge l'agent PPO, et produit le tableau comparatif du benchmark face aux baselines.
-
----
-
-## 8. Système de Monitoring (TensorBoard & Visualisation)
-
-Le module [`src/monitoring.py`](src/monitoring.py) implémente la classe `TrainingLogger` pour un suivi transparent en temps réel :
-
-### 8.1 Métriques Journalisées dans TensorBoard
-1. **Convergence & Pertes d'Optimisation** :
-   - `Loss/Policy_Loss` : Perte de politique clippée PPO ($L^{\text{CLIP}}$).
-   - `Loss/Value_Loss` : Erreur quadratique de la fonction de valeur du Critic ($L^{VF}$).
-   - `Loss/Entropy` : Mesure de la diversité d'exploration stochastique.
-   - `Loss/Approx_KL` : Divergence de Kullback-Leibler pour surveiller la stabilité de la mise à jour.
-2. **Dynamique des Récompenses** :
-   - `Reward/Episode_Reward` : Récompense cumulée par épisode.
-   - `Reward/Rolling_Mean_10_Reward` : Moyenne mobile lissée sur 10 épisodes.
-3. **Indicateurs Métier & Risque Bancaire** :
-   - `Financial/Total_Profit` : Profit net cumulé de la banque ($).
-   - `Financial/Approval_Rate` : Taux de dossiers accordés (%).
-   - `Financial/Default_Rate` : Taux de défauts constatés parmi les dossiers accordés (%).
-   - `Financial/ROI` : Retour sur capital prêté.
-   - `Financial/Volume_Lent` : Volume total de crédit octroyé ($).
-
-### 8.2 Commandes pour Visualiser TensorBoard
+#### 3. Visualisation Interactive avec TensorBoard :
 ```bash
 tensorboard --logdir runs
 ```
-L'interface est alors accessible dans votre navigateur à l'adresse : `http://localhost:6006/`.
-
-### 8.3 Tableaux de Bord Automatiques (`reports/`)
-- `reports/learning_curves.png` : Graphique multi-panneaux haute résolution généré automatiquement à la fin de chaque entraînement.
-- `reports/training_history.csv` : Export tabulaire de toutes les métriques pour analyses statistiques ultérieures.
+Accessible dans le navigateur à `http://localhost:6006`.
 
 ---
 
-## 9. Déploiement Web Interactif avec Streamlit (`app.py`)
+### Étape 5 : Déploiement de l'Application Web Interactive Streamlit (`app.py`)
 
-L'application [`app.py`](app.py) fournit une interface utilisateur moderne et intuitive pour interagir directement avec le modèle de Reinforcement Learning.
+L'application [`app.py`](file:///c:/Users/ariis/OneDrive/Documents/Cours%20DIT/Reinforcement%20Learning/groupe-5-proejt/app.py) offre une interface graphique complète et intuitive :
 
-### 9.1 Fonctionnalités de l'Interface Web
-1. **Simulateur de Décision Client Individuel (Temps Réel)** :
-   - Formulaire dynamique permettant de modifier le score FICO, les revenus, l'âge, le montant du prêt, le collatéral et les facteurs macroéconomiques.
-   - Prédiction instantanée avec l'agent PPO (`models/best_ppo_agent.pt`).
-   - Affichage du verdict (Accord / Refus) avec les probabilités de décision de la politique $\pi_\theta(a|s)$, la probabilité estimée de défaut $P(\text{Défaut})$, le ratio Dette/Revenu (DTI), le taux de couverture des garanties et le gain ou la perte potentielle.
-2. **Tableau de Bord Portefeuille & Benchmark Comparatif** :
-   - Évaluation en 1 clic sur les 500 dossiers du dataset historique.
-   - Graphiques interactifs Plotly comparant le Profit Net, le ROI, le Taux d'Approbation et le Taux de Défaut face aux stratégies de référence.
-3. **Théorie du MDP & Monitoring Visuel** :
-   - Consultation des spécifications du MDP et visualisation intégrée des courbes d'apprentissage (`reports/learning_curves.png`).
+#### 1. Simulateur Client Individuel (Temps Réel) :
+- Permet de saisir les paramètres d'un emprunteur (Score FICO, Revenus, Âge, EAD, Collatéral, Taux, Durée, Macroéconomie).
+- Déclenche l'inférence instantanée avec l'agent PPO (`models/best_ppo_agent.pt`).
+- Affiche le verdict visuel (**PRÊT APPROUVÉ** / **PRÊT REJETÉ**), la jauge de probabilité de la politique, la probabilité estimée de défaut $P(\text{Défaut})$, le ratio DTI et les gains/pertes projetés.
 
-### 9.2 Commande de Lancement
+#### 2. Benchmark de Portefeuille (500 Dossiers) :
+- Exécute en un clic la simulation sur les 500 dossiers historiques.
+- Affiche des graphiques comparatifs interactifs **Plotly** (Profit Net, ROI, Taux d'approbation et de défaut) face aux 3 politiques de référence.
+
+#### 3. Théorie MDP & Observabilité :
+- Rappelle les équations formelles du MDP et affiche les courbes d'apprentissage (`reports/learning_curves.png`).
+
+#### Commande de Lancement :
 ```bash
 streamlit run app.py
+```
+Accessible sur `http://localhost:8501`.
+
+---
+
+## 6. Suite de Tests & Validation Automatisée
+
+La robustesse du projet est vérifiée par 11 tests unitaires automatisés couvrant tous les modules :
+
+| Fichier de Test | Composants Validés | Statut |
+| :--- | :--- | :---: |
+| **`tests/test_environment.py`** | Preprocessor, Conformité `check_env` Gymnasium, Transitions & Récompenses | `4/4 Passed` |
+| **`tests/test_ppo.py`** | Formes des tenseurs Actor-Critic, RolloutBuffer & GAE, Agent update, Save/Load | `4/4 Passed` |
+| **`tests/test_monitoring.py`** | SummaryWriter TensorBoard, Export CSV, Rendu graphique PNG | `1/1 Passed` |
+| **`tests/test_streamlit_app.py`** | Initialisation de l'application, Inférence en ligne de l'agent PPO | `2/2 Passed` |
+
+Exécution globale :
+```bash
+python -m pytest tests/
+# 11 passed in 12.42s
 ```
 
 ---
 
-## 10. Résultats et Comparaison Approfondie des Stratégies
+## 7. Résultats Comparatifs & Analyse Financière
 
-L'évaluation sur l'ensemble du portefeuille de 500 dossiers de demandes de crédit donne les résultats suivants :
+Évaluation sur le portefeuille complet de 500 dossiers de demandes de crédit :
 
 | Stratégie | Approbations | Défauts | Volume Prêté ($) | Profit Net ($) | ROI (%) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -364,10 +343,10 @@ L'évaluation sur l'ensemble du portefeuille de 500 dossiers de demandes de cré
 | **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | 98.45% |
 | **4. Agent PPO (Reinforcement Learning)** | **352/500 (70.4%)** | **248 (70.5%)** | **17,892,166 $** | **4,340,909.49 $** | **24.26%** |
 
-### Analyse Comparative :
-1. **L'Approche Naïve (Tout Approuver)** génère un volume élevé mais accumule $75\%$ de défauts. Bien que profitable grâce aux taux élevés, elle expose la banque à un risque systémique majeur et immobilise $24.88\text{M}\$$ de capital.
-2. **L'Heuristique Experte** n'a aucun défaut ($0\%$) et un ROI de $98.45\%$, mais elle rejette $99.4\%$ des demandeurs, générant un énorme manque à gagner pour l'institution financière ($19\,570\$$ de profit seulement).
-3. **L'Agent PPO (RL)** réussit à trouver le **point d'équilibre optimal** :
-   - Il génère un profit net supérieur (**$4\,340\,909.49\$$**) à la politique naïve.
-   - Il engage **$7.0$ millions de dollars de capital en moins** ($17.89\text{M}\$$ contre $24.88\text{M}\$$).
-   - Son rendement des fonds prêtés (**ROI**) grimpe à **$24.26\%$** (+7.00 points par rapport à la politique naïve).
+### Synthèse des Enseignements Économiques :
+1. **L'Approche Naïve (Tout Approuver)** génère un volume important mais subit $75\%$ de défauts, immobilisant $24.88\text{M}\$$ de capital et créant un risque systémique pour la banque.
+2. **L'Heuristique Experte** est exempte de défaut ($0\%$), mais sa rigidité extrême ($0.6\%$ d'approbation) engendre un manque à gagner critique ($19\,570\$$ de profit seulement).
+3. **L'Agent PPO (RL)** réalise le compromis optimal de la **frontière efficiente** :
+   - Il génère **$4\,340\,909.49\$$** de profit net supérieur.
+   - Il améliore le **ROI de $+7.00$ points de pourcentage ($24.26\%$)**.
+   - Il protège le bilan en économisant **$7.0$ millions de dollars de capital** qui auraient été alloués à des prêts toxiques.
