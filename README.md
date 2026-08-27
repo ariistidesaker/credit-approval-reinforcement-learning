@@ -102,7 +102,7 @@ L'environnement est implémenté sous la classe [`CreditApprovalEnv`](src/credit
 
 ---
 
-## 📊 Résultats des Politiques de Référence (Baselines)
+## 📊 Résultats du Benchmark Comparatif (500 Dossiers)
 
 Évaluation sur un portefeuille de 500 dossiers de demandes de prêt :
 
@@ -110,7 +110,13 @@ L'environnement est implémenté sous la classe [`CreditApprovalEnv`](src/credit
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **1. Tout Approuver (Naïf)** | 500/500 (100.0%) | 375 (75.0%) | 24,888,053 $ | 4,294,743.06 $ | 17.26% |
 | **2. Aléatoire (50/50)** | 244/500 (48.8%) | 181 (74.2%) | 12,052,187 $ | 1,955,933.20 $ | 16.23% |
-| **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | **98.45%** |
+| **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | 98.45% |
+| **4. Agent PPO (Reinforcement Learning)** | **386/500 (77.2%)** | **277 (71.8%)** | **19,174,444 $** | **4,357,467.39 $** | **22.73%** |
+
+> **Analyse des Performances de l'Agent PPO :**
+> - **Surpasse la politique naïve** en profit net ($+62\,724\$$ de bénéfice supplémentaire) tout en engageant **$5.7$ millions de dollars de capital en moins** ($19.17\text{M}\$$ contre $24.88\text{M}\$$).
+> - **Augmentation du ROI** à **$22.73\%$** (+5.47 points de pourcentage par rapport au tout approuver).
+> - L'agent a appris à rejeter de manière ciblée les dossiers à profil asymétrique défavorable (faibles taux / garanties insuffisantes / risque de défaut élevé).
 
 ---
 
