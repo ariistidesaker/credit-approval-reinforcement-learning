@@ -61,23 +61,51 @@ $$\mathbb{P}(S_{t+1} = s' \mid S_t = s_t, A_t = a_t, S_{t-1}, A_{t-1}, \dots) = 
 
 ## 3. Modélisation Mathématique du MDP de Crédit
 
+Le processus décisionnel séquentiel est modélisé par l'interaction entre l'institution bancaire (l'environnement MDP) et l'agent intelligent (l'Actor-Critic PPO) :
+
 ```mermaid
-graph TD
-    subgraph Env["Environnement MDP (CreditApprovalEnv)"]
-        S["État s_t : 18 features normalisées"]
-        Trans["Transition : dossier t+1 et màj capital"]
-        Rew["Calcul financier net r_t"]
+flowchart TD
+    subgraph S_Box["1. ESPACE DES ÉTATS (S in R^18)"]
+        S["Vecteur d'état normalisé s_t<br/>• Profil Emprunteur : Score FICO, Âge, Revenu, Emploi<br/>• Caractéristiques Prêt : Montant EAD, Collatéral, Taux, Durée<br/>• Ratios Financiers : Debt-to-Income DTI, Coverage Ratio<br/>• Contexte Macro : PIB, Inflation, Taux Directeur"]
     end
 
-    subgraph Agent["Agent RL (DQN / PPO)"]
-        Policy["Politique pi(a | s)"]
+    subgraph Agent_Box["2. AGENT INTELLIGENT (Actor-Critic PPO)"]
+        Actor["Réseau Actor pi_theta(a | s)<br/>Politique Catégorielle -> Logits"]
+        Critic["Réseau Critic V_phi(s)<br/>Estimation Valeur d'État"]
+        GAE["RolloutBuffer & GAE-lambda<br/>Calcul Avantage A_hat et Retours R_t"]
     end
 
-    S --> Policy
-    Policy -->|"Action a = 0 (Rejeter) ou 1 (Approuver)"| Trans
-    Policy -->|"Action a"| Rew
-    Rew -->|"Récompense scalaire r_t"| Policy
-    Trans -->|"Nouvel État s_t+1"| Policy
+    subgraph Action_Box["3. ESPACE DES ACTIONS (A)"]
+        A0["a = 0 : Rejeter le prêt"]
+        A1["a = 1 : Approuver le prêt"]
+    end
+
+    subgraph Env_Box["4. ENVIRONNEMENT MDP & RISQUE (CreditApprovalEnv)"]
+        SimRisk["Moteur Stochastique de Risque<br/>P_Defaut = sigmoid(Score, DTI, Macro)"]
+        subgraph Outcomes["Issues Financières Réelles"]
+            O_Rej["Refus : Frais de dossier minime (-10 $)"]
+            O_Repay["Remboursement sans défaut (1 - P_Defaut)<br/>+ EAD * (Taux_Prêt - Coût_Fonds) * Durée"]
+            O_Def["Défaut de paiement (P_Defaut)<br/>- (EAD * LGD - Collatéral * 0.8)+"]
+        end
+        Trans["Dynamique de Transition P<br/>• Dossier suivant : s_t+1<br/>• Mise à jour Capital : C_t+1 = C_t + Profit<br/>• Métriques : Volume prêté, Taux défaut, ROI"]
+    end
+
+    subgraph Reward_Box["5. FONCTION DE RÉCOMPENSE (R)"]
+        Rew["Récompense Normalisée : r_t = Profit_Net * 10^-4"]
+    end
+
+    S --> Actor
+    S --> Critic
+    Actor -->|"Décision"| Action_Box
+    Action_Box --> SimRisk
+    SimRisk --> Outcomes
+    Outcomes --> Rew
+    Outcomes --> Trans
+    Rew -->|"Signal r_t"| GAE
+    Critic -->|"V(s)"| GAE
+    GAE -->|"Perte Clippée L_CLIP + L_VF"| Actor
+    GAE -->|"Perte Valeur"| Critic
+    Trans -->|"Nouvel État s_t+1"| S
 ```
 
 ### 3.1 Espace des États ($\mathcal{S} \in \mathbb{R}^{18}$)
@@ -114,16 +142,60 @@ Chaque état représente un dossier de demande de prêt composé de 18 variables
 
 ---
 
-## 4. Schéma Global du Workflow
+## 4. Schéma Global du Workflow du Projet (Étapes 1 à 5)
+
+L'architecture de bout en bout du projet intègre l'ensemble du cycle de vie RL, depuis l'ingestion des données jusqu'au déploiement interactif :
 
 ```mermaid
 flowchart TD
-    A["1. Dataset Kaggle Brute<br/>synthetic_sadc_lgd_dataset.csv"] -->|"download_data.py"| B["2. Dossier Local data/"]
-    B -->|"preprocessing.py"| C["3. Pipeline de Preprocessing<br/>Nettoyage, Ratios, One-Hot & Scaling"]
-    C -->|"Matrice des etats 500x18"| D["4. Gymnasium Env MDP<br/>credit_mdp_env.py"]
-    E["Modelisation Risque P_Defaut<br/>utils.py"] --> D
-    D -->|"reset et step"| F["5. Entraînement PPO & Buffer GAE<br/>src/ppo/ & train_ppo.py"]
-    F --> G["6. Benchmark Final & Évaluation Baselines<br/>main.py"]
+    subgraph Step1["Étape 1 : Ingestion & Stockage des Données"]
+        Kaggle["Dataset Kaggle SADC LGD<br/>zvikomborerocmufari/southern-african-banks-lgd-data-simulation"]
+        Downloader["data/download_data.py<br/>Téléchargement automatisé kagglehub"]
+        RawCSV["data/synthetic_sadc_lgd_dataset.csv<br/>500 dossiers bruts (13 colonnes)"]
+        Kaggle --> Downloader --> RawCSV
+    end
+
+    subgraph Step2["Étape 2 : Feature Engineering & Environnement MDP"]
+        Preproc["src/preprocessing.py<br/>• Calcul Ratios (DTI, Coverage)<br/>• One-Hot Encoding Catégories<br/>• Normalisation StandardScaler"]
+        RiskUtil["src/utils.py<br/>• Modélisation P(Défaut) Logistique<br/>• Moteur de Gains/Pertes Financiers"]
+        GymEnv["src/credit_mdp_env.py<br/>Classe MDP Gymnasium CreditApprovalEnv<br/>S in R^18, A in {0, 1}, Reward Économique"]
+        RawCSV --> Preproc
+        Preproc -->|"Matrice d'états (500, 18)"| GymEnv
+        RiskUtil --> GymEnv
+    end
+
+    subgraph Step3["Étape 3 : Algorithme & Entraînement PPO"]
+        Networks["src/ppo/networks.py<br/>Actor MLP (18->64->64->2)<br/>Critic MLP (18->64->64->1)"]
+        Buffer["src/ppo/buffer.py<br/>RolloutBuffer & GAE-lambda"]
+        Agent["src/ppo/agent.py<br/>PPOAgent (Perte Clippée eps=0.2)"]
+        Trainer["src/train_ppo.py<br/>Boucle d'entraînement (150 épisodes)"]
+        ModelSaved["models/best_ppo_agent.pt<br/>Meilleur Modèle Sauvegardé"]
+        GymEnv --> Trainer
+        Networks --> Agent
+        Buffer --> Agent
+        Agent --> Trainer
+        Trainer --> ModelSaved
+    end
+
+    subgraph Step4["Étape 4 : Système de Monitoring & Analytics"]
+        Logger["src/monitoring.py<br/>Classe TrainingLogger"]
+        TB["runs/ (TensorBoard)<br/>Policy Loss, Value Loss, Rewards, Profits"]
+        Plots["reports/learning_curves.png<br/>Dashboard 4 Panneaux Haute Résolution"]
+        CSVLog["reports/training_history.csv<br/>Historique Épisode par Épisode"]
+        Trainer --> Logger
+        Logger --> TB
+        Logger --> Plots
+        Logger --> CSVLog
+    end
+
+    subgraph Step5["Étape 5 : Déploiement Web & Benchmark"]
+        AppStreamlit["app.py (Streamlit Web App)<br/>• Simulateur Client Temps Réel<br/>• Benchmark Portefeuille 500 dossiers<br/>• Observabilité & Courbes d'Apprentissage"]
+        MainCLI["main.py (CLI Benchmark)<br/>Comparaison : Naïf vs Aléatoire vs Expert vs PPO"]
+        ModelSaved --> AppStreamlit
+        ModelSaved --> MainCLI
+        Preproc --> AppStreamlit
+        GymEnv --> MainCLI
+    end
 ```
 
 ---

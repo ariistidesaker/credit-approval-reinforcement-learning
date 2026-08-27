@@ -110,6 +110,41 @@ python -m pytest tests/
 
 ## 🧠 Modélisation du MDP (*Markov Decision Process*)
 
+```mermaid
+flowchart TD
+    subgraph S_Box["1. ESPACE DES ÉTATS (S in R^18)"]
+        S["Vecteur normalisé s_t : Score FICO, Âge, Revenu, EAD, Collatéral, Taux, Durée, DTI, Macro"]
+    end
+
+    subgraph Agent_Box["2. AGENT PPO (Actor-Critic)"]
+        Actor["Actor pi_theta(a | s) : Politique"]
+        Critic["Critic V_phi(s) : Valeur d'État"]
+    end
+
+    subgraph Action_Box["3. ACTIONS (A)"]
+        A["a in {0: Rejeter, 1: Approuver}"]
+    end
+
+    subgraph Env_Box["4. ENVIRONNEMENT BANCAIRE MDP"]
+        Risk["Simulation P(Défaut)"]
+        Trans["Transition C_t+1, Dossier s_t+1"]
+    end
+
+    subgraph Reward_Box["5. RÉCOMPENSE (R)"]
+        Rew["r_t = 10^-4 * Profit_Net"]
+    end
+
+    S --> Actor
+    S --> Critic
+    Actor --> A
+    A --> Risk
+    Risk --> Trans
+    Risk --> Rew
+    Rew --> Actor
+    Rew --> Critic
+    Trans --> S
+```
+
 L'environnement est implémenté sous la classe [`CreditApprovalEnv`](src/credit_mdp_env.py) conforme aux spécifications **Gymnasium** :
 
 - **Espace d'État ($\mathcal{S}$)** : Vecteur continu normalisé de dimension **18** :
