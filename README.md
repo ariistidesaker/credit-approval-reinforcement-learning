@@ -66,8 +66,14 @@ cd credit-approval-reinforcement-learning
 ```
 
 ### 2. Créer un Environnement Virtuel
+
+Le projet nécessite **Python 3.10 ou plus**. Sur macOS, `python3` pointe souvent vers le Python 3.9 d'Xcode : vérifie d'abord la version.
+
 ```bash
-python -m venv .venv
+python3 --version
+# Doit afficher 3.10, 3.11 ou 3.12. Sinon : python3.10, python3.11 ou python3.12
+
+python3.10 -m venv .venv
 # Sur Windows :
 .venv\Scripts\activate
 # Sur Linux/Mac :
@@ -78,6 +84,8 @@ source .venv/bin/activate
 ```bash
 pip install -r requirements.txt
 ```
+
+`requirements.txt` verrouille `numpy<2` pour rester compatible avec PyTorch (NumPy 2.x provoque l'erreur `_ARRAY_API not found`).
 
 ---
 
