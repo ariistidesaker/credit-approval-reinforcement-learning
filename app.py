@@ -107,6 +107,14 @@ ppo_agent, ppo_loaded = load_ppo_agent(state_dim=state_dim)
 dqn_agent, dqn_loaded = load_dqn_agent(state_dim=state_dim)
 
 
+def load_system(data_path: str = "data/synthetic_sadc_lgd_dataset.csv", model_path: str = "models/best_ppo_agent.pt"):
+    """Fonction utilitaire pour compatibilité et tests."""
+    prep, clean_df, s_dim = load_preprocessor(data_path)
+    agent, loaded = load_ppo_agent(model_path, state_dim=s_dim)
+    return prep, agent, clean_df, loaded
+
+
+
 # ==============================================================================
 # En-tête Principal
 # ==============================================================================

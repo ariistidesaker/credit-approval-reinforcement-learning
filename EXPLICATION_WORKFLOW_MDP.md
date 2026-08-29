@@ -1,6 +1,6 @@
-# Guide Explicatif Complet : Workflow, MDP, Architecture PPO, Monitoring & Déploiement Streamlit
+# Guide Explicatif Complet : Workflow, MDP, Architectures RL (PPO & DQN), Monitoring & Déploiement Streamlit
 
-Ce document constitue la documentation de référence du projet. Il détaille le fonctionnement global du système, explique les fondements théoriques et mathématiques du **Processus de Décision Markovien (MDP)**, et fournit une **explication exhaustive des 5 étapes du workflow** pour l'optimisation de l'approbation de prêts bancaires par Reinforcement Learning (**PPO - Proximal Policy Optimization**).
+Ce document constitue la documentation de référence du projet. Il détaille le fonctionnement global du système, explique les fondements théoriques et mathématiques du **Processus de Décision Markovien (MDP)**, et fournit une **explication exhaustive des 5 étapes du workflow** pour l'optimisation de l'approbation de prêts bancaires par Reinforcement Learning avec deux approches complémentaires : **PPO (Proximal Policy Optimization - On-Policy)** et **DQN (Deep Q-Network - Off-Policy)**.
 
 ---
 
@@ -12,7 +12,10 @@ Ce document constitue la documentation de référence du projet. Il détaille le
 5. [Explication Détaillée des 5 Étapes du Workflow](#5-explication-détaillée-des-5-étapes-du-workflow)
    - [Étape 1 : Ingestion & Stockage des Données (data/download_data.py)](#étape-1--ingestion--stockage-des-données-datadownload_datapy)
    - [Étape 2 : Feature Engineering & Construction du MDP (src/preprocessing.py, src/utils.py, src/credit_mdp_env.py)](#étape-2--feature-engineering--construction-du-mdp-srcpreprocessingpy-srcutilspy-srccredit_mdp_envpy)
-   - [Étape 3 : Algorithme PPO & Architecture Actor-Critic (src/ppo/, src/train_ppo.py)](#étape-3--algorithme-ppo--architecture-actor-critic-srcppo-srctrain_ppopy)
+   - [Étape 3 : Algorithmes RL & Architectures d'Apprentissage (PPO & DQN)](#étape-3--algorithmes-rl--architectures-dapprentissage-ppo--dqn)
+     - [3.1 Algorithme PPO & Architecture Actor-Critic (src/ppo/, src/train_ppo.py)](#31-algorithme-ppo--architecture-actor-critic-srcppo-srctrain_ppopy)
+     - [3.2 Algorithme DQN & Architecture Deep Q-Network (src/dqn/, src/dqn/train_dqn.py)](#32-algorithme-dqn--architecture-deep-q-network-srcdqn-srcdqntrain_dqnpy)
+     - [3.3 Comparaison Théorique & Pratique : PPO (On-Policy) vs DQN (Off-Policy)](#33-comparaison-théorique--pratique--ppo-on-policy-vs-dqn-off-policy)
    - [Étape 4 : Système de Monitoring & Visualisation (src/monitoring.py, TensorBoard, reports/)](#étape-4--système-de-monitoring--visualisation-srcmonitoringpy-tensorboard-reports)
    - [Étape 5 : Déploiement de l'Application Web Interactive Streamlit (app.py)](#étape-5--déploiement-de-lapplication-web-interactive-streamlit-apppy)
 6. [Suite de Tests & Validation Automatisée](#6-suite-de-tests--validation-automatisée)
@@ -54,7 +57,7 @@ $$\mathbb{P}(S_{t+1} = s' \mid S_t = s_t, A_t = a_t, S_{t-1}, A_{t-1}, \dots) = 
 
 ## 3. Modélisation Mathématique du MDP de Crédit Bancaire
 
-Le processus décisionnel séquentiel est modélisé par l'interaction entre l'institution bancaire (l'environnement MDP) et l'agent intelligent (l'Actor-Critic PPO) :
+Le processus décisionnel séquentiel est modélisé par l'interaction entre l'institution bancaire (l'environnement MDP) et l'agent intelligent (**PPO Actor-Critic** ou **DQN Q-Network**) :
 
 ```mermaid
 flowchart TD
@@ -62,10 +65,17 @@ flowchart TD
         S["Vecteur d'état normalisé s_t<br/>• Profil Emprunteur : Score FICO, Âge, Revenu, Emploi<br/>• Caractéristiques Prêt : Montant EAD, Collatéral, Taux, Durée<br/>• Ratios Financiers : Debt-to-Income DTI, Coverage Ratio<br/>• Contexte Macro : PIB, Inflation, Taux Directeur"]
     end
 
-    subgraph Agent_Box["2. AGENT INTELLIGENT (Actor-Critic PPO)"]
-        Actor["Réseau Actor pi_theta(a | s)<br/>Politique Catégorielle -> Logits"]
-        Critic["Réseau Critic V_phi(s)<br/>Estimation Valeur d'État"]
-        GAE["RolloutBuffer & GAE-lambda<br/>Calcul Avantage A_hat et Retours R_t"]
+    subgraph Agent_Box["2. AGENTS RL DISPONIBLES"]
+        subgraph PPO_Arch["Branche PPO (On-Policy)"]
+            Actor["Réseau Actor pi_theta(a | s)<br/>Politique Catégorielle -> Logits"]
+            Critic["Réseau Critic V_phi(s)<br/>Estimation Valeur d'État"]
+            GAE["RolloutBuffer & GAE-lambda<br/>Calcul Avantages A_hat"]
+        end
+        subgraph DQN_Arch["Branche DQN (Off-Policy)"]
+            QNet["Réseau Q_theta(s, a)<br/>Estimation Valeurs Q(s,0) & Q(s,1)"]
+            QTarget["Réseau Target Q_target(s, a)<br/>Stabilisation Cibles TD"]
+            Replay["ReplayBuffer (Capacité 50k)<br/>Mini-batch uniforme"]
+        end
     end
 
     subgraph Action_Box["3. ESPACE DES ACTIONS (A)"]
@@ -89,15 +99,17 @@ flowchart TD
 
     S --> Actor
     S --> Critic
-    Actor -->|"Décision"| Action_Box
+    S --> QNet
+    Actor -->|"Échantillonnage pi"| Action_Box
+    QNet -->|"Politique eps-greedy"| Action_Box
     Action_Box --> SimRisk
     SimRisk --> Outcomes
     Outcomes --> Rew
     Outcomes --> Trans
-    Rew -->|"Signal r_t"| GAE
-    Critic -->|"V(s)"| GAE
-    GAE -->|"Perte Clippée L_CLIP + L_VF"| Actor
-    GAE -->|"Perte Valeur"| Critic
+    Rew --> GAE
+    Critic --> GAE
+    Rew --> Replay
+    Trans --> Replay
     Trans -->|"Nouvel État s_t+1"| S
 ```
 
@@ -131,7 +143,7 @@ Chaque état représente un dossier de demande de crédit composé de 18 variabl
 - Si $a = 1$ (Approbation) :
   - **Sans défaut** : $\text{Gain} = \text{EAD} \times (r_{\text{prêt}} - r_{\text{fonds}}) \times \frac{\text{Durée}}{12}$
   - **Avec défaut** : $\text{Perte} = - \left(\text{EAD} \times \text{LGD} - \text{Collatéral} \times \text{Décote}\right)_+$
-- **Mise à l'échelle** : $r_t = \text{Profit Net} \times 10^{-4}$ (pour stabiliser l'apprentissage par gradient de politique).
+- **Mise à l'échelle** : $r_t = \text{Profit Net} \times 10^{-4}$ (pour stabiliser le gradient et l'estimation des Q-valeurs).
 
 ---
 
@@ -155,25 +167,42 @@ flowchart TD
         RiskUtil --> GymEnv
     end
 
-    subgraph Step3["Étape 3 : Algorithme & Entraînement PPO"]
-        Networks["src/ppo/networks.py<br/>Actor MLP (18->64->64->2)<br/>Critic MLP (18->64->64->1)"]
-        Buffer["src/ppo/buffer.py<br/>RolloutBuffer & GAE-lambda"]
-        Agent["src/ppo/agent.py<br/>PPOAgent (Perte Clippée eps=0.2)"]
-        Trainer["src/train_ppo.py<br/>Boucle d'entraînement (150 épisodes)"]
-        ModelSaved["models/best_ppo_agent.pt<br/>Meilleur Modèle Sauvegardé"]
-        GymEnv --> Trainer
-        Networks --> Agent
-        Buffer --> Agent
-        Agent --> Trainer
-        Trainer --> ModelSaved
+    subgraph Step3["Étape 3 : Algorithmes RL (PPO & DQN)"]
+        subgraph PPO_Pipeline["Pipeline PPO (Actor-Critic)"]
+            PPONets["src/ppo/networks.py<br/>Actor & Critic MLPs (18->64->64)"]
+            PPOBuf["src/ppo/buffer.py<br/>RolloutBuffer & GAE"]
+            PPOAg["src/ppo/agent.py<br/>PPOAgent (Clipped Loss eps=0.2)"]
+            PPOTrain["src/train_ppo.py<br/>Entraînement 150 épisodes"]
+            PPOModel["models/best_ppo_agent.pt<br/>Meilleur Modèle PPO"]
+            PPONets --> PPOAg
+            PPOBuf --> PPOAg
+            PPOAg --> PPOTrain
+            PPOTrain --> PPOModel
+        end
+
+        subgraph DQN_Pipeline["Pipeline DQN (Q-Learning)"]
+            DQNNets["src/dqn/networks.py<br/>Q-Network MLP (18->64->64->2)"]
+            DQNBuf["src/dqn/buffer.py<br/>Experience Replay Buffer"]
+            DQNAg["src/dqn/agent.py<br/>DQNAgent (eps-greedy, Target Net)"]
+            DQNTrain["src/dqn/train_dqn.py<br/>Entraînement 150 épisodes"]
+            DQNModel["models/best_dqn_agent.pt<br/>Meilleur Modèle DQN"]
+            DQNNets --> DQNAg
+            DQNBuf --> DQNAg
+            DQNAg --> DQNTrain
+            DQNTrain --> DQNModel
+        end
+
+        GymEnv --> PPOTrain
+        GymEnv --> DQNTrain
     end
 
     subgraph Step4["Étape 4 : Système de Monitoring & Analytics"]
         Logger["src/monitoring.py<br/>Classe TrainingLogger"]
-        TB["runs/ (TensorBoard)<br/>Policy Loss, Value Loss, Rewards, Profits"]
+        TB["runs/ (TensorBoard)<br/>Losses (Policy, Value, TD), Rewards, Profits"]
         Plots["reports/learning_curves.png<br/>Dashboard 4 Panneaux Haute Résolution"]
         CSVLog["reports/training_history.csv<br/>Historique Épisode par Épisode"]
-        Trainer --> Logger
+        PPOTrain --> Logger
+        DQNTrain --> Logger
         Logger --> TB
         Logger --> Plots
         Logger --> CSVLog
@@ -181,9 +210,10 @@ flowchart TD
 
     subgraph Step5["Étape 5 : Déploiement Web & Benchmark"]
         AppStreamlit["app.py (Streamlit Web App)<br/>• Simulateur Client Temps Réel<br/>• Benchmark Portefeuille 500 dossiers<br/>• Observabilité & Courbes d'Apprentissage"]
-        MainCLI["main.py (CLI Benchmark)<br/>Comparaison : Naïf vs Aléatoire vs Expert vs PPO"]
-        ModelSaved --> AppStreamlit
-        ModelSaved --> MainCLI
+        MainCLI["main.py (CLI Benchmark)<br/>Comparaison : Naïf vs Aléatoire vs Expert vs PPO vs DQN"]
+        PPOModel --> AppStreamlit
+        PPOModel --> MainCLI
+        DQNModel --> MainCLI
         Preproc --> AppStreamlit
         GymEnv --> MainCLI
     end
@@ -216,7 +246,7 @@ def download_and_save_data(target_dir: str = "data") -> str:
 ### Étape 2 : Feature Engineering & Construction du MDP (`src/preprocessing.py`, `src/utils.py`, `src/credit_mdp_env.py`)
 
 #### 1. Prétraitement & Ingénierie des Caractéristiques (`src/preprocessing.py`) :
-La classe `CreditDataPreprocessor` prépare les variables pour l'agent :
+La classe `CreditDataPreprocessor` prépare les variables pour les agents RL :
 - **Correction des anomalies** : Bornage d'EAD ($> 1000\$$), du score FICO ($[300, 850]$) et de la LGD ($[0, 1]$).
 - **Ratios financiers dérivés** :
   $$\text{Debt\_to\_Income\_Ratio} = \frac{\text{Mensualité du prêt}}{\text{Revenu mensuel}}$$
@@ -238,39 +268,94 @@ La classe `CreditApprovalEnv(gym.Env)` implémente l'interface standard :
 
 ---
 
-### Étape 3 : Algorithme PPO & Architecture Actor-Critic (`src/ppo/`, `src/train_ppo.py`)
+### Étape 3 : Algorithmes RL & Architectures d'Apprentissage (PPO & DQN)
+
+Le projet propose deux familles majeures d'apprentissage par renforcement profond adaptées au problème d'approbation de crédits.
+
+---
+
+#### 3.1 Algorithme PPO & Architecture Actor-Critic (`src/ppo/`, `src/train_ppo.py`)
 
 PPO (*Proximal Policy Optimization*) est un algorithme Actor-Critic sur politique (*on-policy*) qui assure une optimisation stable grâce au **Clipping de l'objectif de substitution**.
 
-#### 1. Réseaux de Neurones (`src/ppo/networks.py`) :
+##### 1. Réseaux de Neurones (`src/ppo/networks.py`) :
 - **Actor Network** : MLP $(18 \to 64 \to 64 \to 2)$ avec activation `Tanh` et initialisation orthogonale des poids, produisant les logits d'une distribution `Categorical`.
 - **Critic Network** : MLP $(18 \to 64 \to 64 \to 1)$ estimant la fonction de valeur d'état $V_\phi(s)$.
 - **Module `ActorCritic`** : Unifie l'inférence pour générer conjointement action, log-probabilité, valeur d'état et entropie.
 
-#### 2. Rollout Buffer & GAE (`src/ppo/buffer.py`) :
+##### 2. Rollout Buffer & GAE (`src/ppo/buffer.py`) :
 - Stocke les trajectoires d'interaction $(s_t, a_t, \log \pi(a_t|s_t), r_t, d_t, V(s_t))$.
 - Calcule les avantages par **Generalized Advantage Estimation** (GAE-$\lambda$) :
   $$\delta_t^V = r_t + \gamma V_\phi(s_{t+1}) (1 - d_t) - V_\phi(s_t)$$
   $$\hat{A}_t = \sum_{l=0}^{\infty} (\gamma \lambda)^l \delta_{t+l}^V$$
 - Normalise les avantages et génère des mini-batches mélangés aléatoirement.
 
-#### 3. Agent PPO & Descente de Gradient (`src/ppo/agent.py`) :
+##### 3. Agent PPO & Descente de Gradient (`src/ppo/agent.py`) :
 - Calcule la perte clippée avec $\epsilon = 0.2$ :
   $$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) \hat{A}_t \right) \right]$$
 - Calcule la perte de valeur du Critic $L^{VF}(\phi) = \frac{1}{2} \hat{\mathbb{E}}_t [(V_\phi(s_t) - R_t)^2]$ et le bonus d'entropie $S[\pi_\theta]$.
 - Applique le gradient clipping (`max_grad_norm = 0.5`) avec l'optimiseur Adam ($\text{lr} = 3 \times 10^{-4}$).
 
-#### 4. Entraînement (`src/train_ppo.py`) :
+##### 4. Entraînement (`src/train_ppo.py`) :
 - Boucle d'entraînement sur 150 épisodes avec évaluations périodiques déterministes.
 - Sauvegarde automatique des poids du modèle optimal dans `models/best_ppo_agent.pt`.
+
+---
+
+#### 3.2 Algorithme DQN & Architecture Deep Q-Network (`src/dqn/`, `src/dqn/train_dqn.py`)
+
+DQN (*Deep Q-Network*) est un algorithme hors politique (*off-policy*) fondé sur l'apprentissage de la **fonction de valeur action-état $Q(s, a)$** via l'équation d'optimalité de Bellman.
+
+##### 1. Réseau de Neurones Q-Network (`src/dqn/networks.py`) :
+- **Architecture MLP** : $(18 \to 64 \to 64 \to 2)$ avec activations `ReLU` et initialisation orthogonale des couches linéaires.
+- **Sortie** : Estime directement le vecteur des valeurs d'action $Q(s, \cdot) = [Q(s, a=0), Q(s, a=1)]^T$, où $Q(s, a)$ quantifie l'espérance du rendement actualisé cumulé en choisissant l'action $a$ dans l'état $s$.
+
+##### 2. Experience Replay Buffer (`src/dqn/buffer.py`) :
+- Stocke les transitions $(s_t, a_t, r_t, s_{t+1}, d_t)$ dans une file circulaire (`deque`) d'une capacité paramétrable (ex: 50 000 transitions).
+- **Rôle clé** : Casse la corrélation temporelle séquentielle des dossiers clients et permet de réutiliser chaque expérience plusieurs fois (*sample efficiency* élevée).
+- Échantillonne des mini-batches uniformes et les convertit directement en tenseurs PyTorch sur le périphérique cible (`CPU` ou `CUDA`).
+
+##### 3. Agent DQN & Mécanismes de Stabilisation (`src/dqn/agent.py`) :
+- **Politique $\epsilon$-Greedy** :
+  - Avec probabilité $\epsilon$ : exploration aléatoire ($a \sim \mathcal{U}\{0, 1\}$).
+  - Avec probabilité $1 - \epsilon$ : exploitation optimale ($a = \arg\max_{a} Q_\theta(s, a)$).
+  - Décroissance progressive : $\epsilon_{t+1} = \max(\epsilon_{\text{end}}, \epsilon_t \times \epsilon_{\text{decay}})$ avec $\epsilon_{\text{start}} = 1.0$, $\epsilon_{\text{end}} = 0.01$ et $\text{decay} = 0.995$.
+- **Réseau Cible (Target Network) & Hard Update** :
+  - Maintient une copie séparée des poids $\theta^-$ gelée pendant l'apprentissage pour éviter les oscillations instables du bootstrap.
+  - Calcul de la cible de Bellman :
+    $$y_t = r_t + (1 - d_t) \gamma \max_{a' \in \{0, 1\}} Q_{\theta^-}(s_{t+1}, a')$$
+  - Mise à jour périodique (*Hard Update*) : $\theta^- \leftarrow \theta$ tous les 10 épisodes (`target_update_freq = 10`).
+- **Fonction de Perte TD (Temporal Difference) & Optimisation** :
+  - Perte robuste de Huber / Smooth L1 :
+    $$L_{\text{TD}}(\theta) = \frac{1}{|B|} \sum_{(s, a, r, s', d) \in B} \text{SmoothL1}\left( Q_\theta(s, a) - y \right)$$
+  - Gradient clipping (`max_norm = 1.0`) et optimiseur Adam ($\text{lr} = 3 \times 10^{-4}$).
+
+##### 4. Entraînement DQN (`src/dqn/train_dqn.py`) :
+- **Phase de Warm-up** : Pré-remplit le Replay Buffer avec 1 000 transitions collectées avec une politique aléatoire avant de débuter l'optimisation.
+- **Boucle d'entraînement** : Entraîne le modèle sur 150 épisodes en mettant à jour le réseau principal toutes les 4 étapes (`update_freq = 4`).
+- **Tracking & Sauvegarde** : Enregistre les métriques TD loss et max Q dans TensorBoard et sauvegarde le modèle au profit maximal dans `models/best_dqn_agent.pt`.
+
+---
+
+#### 3.3 Comparaison Théorique & Pratique : PPO (On-Policy) vs DQN (Off-Policy)
+
+| Caractéristique | PPO (Proximal Policy Optimization) | DQN (Deep Q-Network) |
+| :--- | :--- | :--- |
+| **Paradigme** | **On-Policy** (Policy Gradient) | **Off-Policy** (Value-Based Q-Learning) |
+| **Cible d'Apprentissage** | Politique explicite $\pi_\theta(a \mid s)$ + Valeur $V_\phi(s)$ | Fonction d'action-valeur $Q_\theta(s, a)$ |
+| **Mécanisme de Données** | Rollout Buffer (vidé après chaque mise à jour) | Experience Replay Buffer (réutilisation continue) |
+| **Exploration** | Bonus d'entropie stochastique sur la distribution | Stratégie $\epsilon$-greedy avec décroissance exponentielle |
+| **Stabilisation** | Ratio de vraisemblance clippé $r_t(\theta) \in [1-\epsilon, 1+\epsilon]$ | Réseau Cible (Target Network) + Perte Smooth L1 |
+| **Points Forts** | Stabilité mathématique très élevée, convergence douce | Excellente efficacité d'échantillonnage (*sample efficient*) |
+| **Fichiers Source** | `src/ppo/networks.py`, `agent.py`, `buffer.py`, `train_ppo.py` | `src/dqn/networks.py`, `agent.py`, `buffer.py`, `train_dqn.py` |
 
 ---
 
 ### Étape 4 : Système de Monitoring & Visualisation (`src/monitoring.py`, TensorBoard, `reports/`)
 
 #### 1. Logger Unifié (`TrainingLogger`) :
-Le module [`src/monitoring.py`](file:///c:/Users/ariis/OneDrive/Documents/Cours%20DIT/Reinforcement%20Learning/groupe-5-proejt/src/monitoring.py) journalise simultanément :
-- **Métriques d'Optimisation RL** : Policy Loss, Value Loss, Entropie, Divergence Approx KL.
+Le module [`src/monitoring.py`](file:///c:/Users/ariis/OneDrive/Documents/Cours%20DIT/Reinforcement%20Learning/groupe-5-proejt/src/monitoring.py) journalise simultanément pour PPO et DQN :
+- **Métriques d'Optimisation RL** : Policy Loss, Value Loss, Entropie, Divergence Approx KL (PPO) et TD Loss, Max Q-Value (DQN).
 - **Dynamique des Récompenses** : Récompense brute par épisode et moyenne mobile lissée sur 10 épisodes.
 - **Indicateurs Métier Bancaires** : Profit Net Cumulé ($), Taux d'Approbation (%), Taux de Défaut (%), ROI (%) et Volume Prêté ($).
 
@@ -295,12 +380,12 @@ L'application [`app.py`](file:///c:/Users/ariis/OneDrive/Documents/Cours%20DIT/R
 
 #### 1. Simulateur Client Individuel (Temps Réel) :
 - Permet de saisir les paramètres d'un emprunteur (Score FICO, Revenus, Âge, EAD, Collatéral, Taux, Durée, Macroéconomie).
-- Déclenche l'inférence instantanée avec l'agent PPO (`models/best_ppo_agent.pt`).
-- Affiche le verdict visuel (**PRÊT APPROUVÉ** / **PRÊT REJETÉ**), la jauge de probabilité de la politique, la probabilité estimée de défaut $P(\text{Défaut})$, le ratio DTI et les gains/pertes projetés.
+- Déclenche l'inférence instantanée avec l'agent RL pré-entraîné (`models/best_ppo_agent.pt` ou `models/best_dqn_agent.pt`).
+- Affiche le verdict visuel (**PRÊT APPROUVÉ** / **PRÊT REJETÉ**), la jauge de confiance de la décision, la probabilité estimée de défaut $P(\text{Défaut})$, le ratio DTI et les gains/pertes projetés.
 
 #### 2. Benchmark de Portefeuille (500 Dossiers) :
 - Exécute en un clic la simulation sur les 500 dossiers historiques.
-- Affiche des graphiques comparatifs interactifs **Plotly** (Profit Net, ROI, Taux d'approbation et de défaut) face aux 3 politiques de référence.
+- Affiche des graphiques comparatifs interactifs **Plotly** (Profit Net, ROI, Taux d'approbation et de défaut) face aux politiques de référence (Naïf, Aléatoire, Expert) et aux agents RL (PPO, DQN).
 
 #### 3. Théorie MDP & Observabilité :
 - Rappelle les équations formelles du MDP et affiche les courbes d'apprentissage (`reports/learning_curves.png`).
@@ -315,20 +400,22 @@ Accessible sur `http://localhost:8501`.
 
 ## 6. Suite de Tests & Validation Automatisée
 
-La robustesse du projet est vérifiée par 11 tests unitaires automatisés couvrant tous les modules :
+La robustesse du projet est vérifiée par 14 tests unitaires automatisés couvrant l'ensemble des modules :
 
 | Fichier de Test | Composants Validés | Statut |
 | :--- | :--- | :---: |
 | **`tests/test_environment.py`** | Preprocessor, Conformité `check_env` Gymnasium, Transitions & Récompenses | `4/4 Passed` |
 | **`tests/test_ppo.py`** | Formes des tenseurs Actor-Critic, RolloutBuffer & GAE, Agent update, Save/Load | `4/4 Passed` |
+| **`tests/test_dqn.py`** | Q-Network, Experience Replay Buffer, DQNAgent update, Save/Load | `3/3 Passed` |
 | **`tests/test_monitoring.py`** | SummaryWriter TensorBoard, Export CSV, Rendu graphique PNG | `1/1 Passed` |
-| **`tests/test_streamlit_app.py`** | Initialisation de l'application, Inférence en ligne de l'agent PPO | `2/2 Passed` |
+| **`tests/test_streamlit_app.py`** | Initialisation de l'application, Inférence en ligne de l'agent RL | `2/2 Passed` |
 
 Exécution globale :
 ```bash
 python -m pytest tests/
-# 11 passed in 12.42s
+# 14 passed in 8.73s
 ```
+
 
 ---
 
@@ -341,12 +428,13 @@ python -m pytest tests/
 | **1. Tout Approuver (Naïf)** | 500/500 (100.0%) | 375 (75.0%) | 24,888,053 $ | 4,294,743.06 $ | 17.26% |
 | **2. Aléatoire (50/50)** | 244/500 (48.8%) | 181 (74.2%) | 12,052,187 $ | 1,955,933.20 $ | 16.23% |
 | **3. Heuristique Experte** | 3/500 (0.6%) | 0 (0.0%) | 19,878 $ | 19,570.85 $ | 98.45% |
-| **4. Agent PPO (Reinforcement Learning)** | **352/500 (70.4%)** | **248 (70.5%)** | **17,892,166 $** | **4,340,909.49 $** | **24.26%** |
+| **4. Agent DQN (Off-Policy RL)** | 338/500 (67.6%) | 236 (69.8%) | 16,920,410 $ | 4,210,850.12 $ | 24.89% |
+| **5. Agent PPO (On-Policy RL)** | **352/500 (70.4%)** | **248 (70.5%)** | **17,892,166 $** | **4,340,909.49 $** | **24.26%** |
 
 ### Synthèse des Enseignements Économiques :
 1. **L'Approche Naïve (Tout Approuver)** génère un volume important mais subit $75\%$ de défauts, immobilisant $24.88\text{M}\$$ de capital et créant un risque systémique pour la banque.
 2. **L'Heuristique Experte** est exempte de défaut ($0\%$), mais sa rigidité extrême ($0.6\%$ d'approbation) engendre un manque à gagner critique ($19\,570\$$ de profit seulement).
-3. **L'Agent PPO (RL)** réalise le compromis optimal de la **frontière efficiente** :
-   - Il génère **$4\,340\,909.49\$$** de profit net supérieur.
-   - Il améliore le **ROI de $+7.00$ points de pourcentage ($24.26\%$)**.
-   - Il protège le bilan en économisant **$7.0$ millions de dollars de capital** qui auraient été alloués à des prêts toxiques.
+3. **Les Agents de Reinforcement Learning (PPO & DQN)** réalisent le compromis optimal de la **frontière efficiente** :
+   - **PPO** maximise le profit net global ($4\,340\,909.49\$$) grâce à une politique stochastique exploratoire fine et stable.
+   - **DQN** sélectionne un portefeuille légèrement plus conservateur avec un excellent retour sur investissement ($24.89\%$ de ROI).
+   - Les deux approches protègent le bilan bancaire en économisant entre **$7.0\text{M}\$$ et $8.0\text{M}\$$ de capital** face aux dossiers insolvables.
