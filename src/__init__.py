@@ -6,4 +6,7 @@ from src.preprocessing import CreditDataPreprocessor
 from src.credit_mdp_env import CreditApprovalEnv
 from src.monitoring import TrainingLogger
 
+from src import dqn
+
 __all__ = ["CreditDataPreprocessor", "CreditApprovalEnv", "TrainingLogger"]
+

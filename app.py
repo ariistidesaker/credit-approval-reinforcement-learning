@@ -9,6 +9,7 @@ import streamlit as st
 from src.preprocessing import CreditDataPreprocessor
 from src.credit_mdp_env import CreditApprovalEnv
 from src.ppo.agent import PPOAgent
+from src.dqn.agent import DQNAgent
 from src.utils import calculate_default_probability, calculate_financial_outcome
 
 
@@ -75,27 +76,35 @@ st.markdown(
 # Chargement des Modèles et Données (avec Cache)
 # ==============================================================================
 @st.cache_resource
-def load_system(model_path: str = "models/best_ppo_agent.pt", data_path: str = "data/synthetic_sadc_lgd_dataset.csv"):
+def load_preprocessor(data_path: str = "data/synthetic_sadc_lgd_dataset.csv"):
+    """Charge uniquement le préprocesseur et les données."""
     preprocessor = CreditDataPreprocessor(data_path)
     state_matrix, clean_df = preprocessor.fit_transform()
+    return preprocessor, clean_df, state_matrix.shape[1]
 
-    agent = PPOAgent(
-        state_dim=state_matrix.shape[1],
-        action_dim=2,
-        lr=3e-4,
-    )
-
-    if os.path.exists(model_path):
+@st.cache_resource
+def load_ppo_agent(model_path: str = "models/best_ppo_agent.pt", state_dim: int = 18):
+    """Charge l'agent PPO."""
+    agent = PPOAgent(state_dim=state_dim, action_dim=2, lr=3e-4)
+    loaded = os.path.exists(model_path)
+    if loaded:
         agent.load(model_path)
-        loaded = True
-    else:
-        loaded = False
+    return agent, loaded
 
-    return preprocessor, agent, clean_df, loaded
+@st.cache_resource
+def load_dqn_agent(model_path: str = "models/best_dqn_agent.pt", state_dim: int = 18):
+    """Charge l'agent DQN."""
+    agent = DQNAgent(state_dim=state_dim, action_dim=2)
+    loaded = os.path.exists(model_path)
+    if loaded:
+        agent.load(model_path)
+    return agent, loaded
 
 
-# Chargement
-preprocessor, agent, dataset_df, is_model_loaded = load_system()
+# Chargement global
+preprocessor, dataset_df, state_dim = load_preprocessor()
+ppo_agent, ppo_loaded = load_ppo_agent(state_dim=state_dim)
+dqn_agent, dqn_loaded = load_dqn_agent(state_dim=state_dim)
 
 
 # ==============================================================================
@@ -103,7 +112,7 @@ preprocessor, agent, dataset_df, is_model_loaded = load_system()
 # ==============================================================================
 st.markdown('<div class="main-title">🏦 CreditRL : Optimisation de l\'Approbation des Prêts</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="sub-title">Système Décisionnel Autonome basé sur le <b>Reinforcement Learning (PPO)</b> et modélisé par <b>Processus de Décision Markovien (MDP)</b>.</div>',
+    '<div class="sub-title">Système Décisionnel Autonome basé sur le <b>Reinforcement Learning (PPO ou DQN)</b> et modélisé par <b>Processus de Décision Markovien (MDP)</b>.</div>',
     unsafe_allow_html=True,
 )
 
@@ -111,16 +120,30 @@ st.markdown(
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/bank-building.png", width=70)
     st.title("Paramètres & Statut")
-    if is_model_loaded:
-        st.success(" Modèle PPO chargé (`models/best_ppo_agent.pt`)")
+
+    st.markdown("### 🤖 Sélection du Modèle")
+    model_choice = st.selectbox(
+        "Choisissez l'algorithme",
+        ["PPO (Actor-Critic)", "DQN (Deep Q-Network)"],
+        index=0
+    )
+
+    if model_choice == "PPO (Actor-Critic)":
+        if ppo_loaded:
+            st.success(" Modèle PPO chargé (`models/best_ppo_agent.pt`)")
+        else:
+            st.warning("⚠️ Poids PPO non trouvés. Agent initialisé par défaut.")
     else:
-        st.warning("⚠️ Poids pré-entraînés non trouvés. Agent PPO initialisé par défaut.")
+        if dqn_loaded:
+            st.success(" Modèle DQN chargé (`models/best_dqn_agent.pt`)")
+        else:
+            st.warning("⚠️ Poids DQN non trouvés. Agent initialisé par défaut.")
 
     st.markdown("---")
     st.markdown("### 📊 Environnement MDP")
     st.write(f"• **Dimensions d'état** : {preprocessor.state_matrix.shape[1] if hasattr(preprocessor, 'state_matrix') else 18}")
     st.write("• **Actions** : {0: Rejeter, 1: Approuver}")
-    st.write("• **Algorithme** : PPO (Actor-Critic + GAE)")
+    st.write(f"• **Algorithme actif** : {model_choice}")
     st.write(f"• **Taille Portefeuille** : {len(dataset_df)} dossiers")
     st.markdown("---")
     st.caption("Groupe 5 - Projet Reinforcement Learning")
@@ -141,7 +164,7 @@ tab1, tab2, tab3 = st.tabs([
 # ==============================================================================
 with tab1:
     st.subheader("📋 Évaluation en Temps Réel d'un Demandeur de Crédit")
-    st.write("Ajustez les curseurs ci-dessous pour simuler une nouvelle demande de prêt et observer la décision de l'agent PPO.")
+    st.write("Ajustez les curseurs ci-dessous pour simuler une nouvelle demande de prêt et observer la décision de l'agent sélectionné.")
 
     col_input1, col_input2, col_input3 = st.columns(3)
 
@@ -188,12 +211,49 @@ with tab1:
     # Transformation en vecteur d'état
     sample_state, clean_sample = preprocessor.transform(sample_df)
 
-    # Inférence avec l'agent PPO
+    # Inférence selon le modèle choisi
     with torch.no_grad():
-        state_tensor = torch.as_tensor(sample_state, dtype=torch.float32, device=agent.device)
-        dist, value_est = agent.actor_critic(state_tensor)
-        action_probs = dist.probs.cpu().numpy()[0]
-        decision = int(np.argmax(action_probs))
+        state_tensor = torch.as_tensor(sample_state, dtype=torch.float32)
+
+        if model_choice == "PPO (Actor-Critic)":
+            agent = ppo_agent
+            state_tensor = state_tensor.to(agent.device)
+            dist, value_est = agent.actor_critic(state_tensor)
+            action_probs = dist.probs.cpu().numpy()[0]
+            decision = int(np.argmax(action_probs))
+
+            # Graphique des probabilités
+            fig_data = go.Bar(
+                x=["0: Rejeter", "1: Approuver"],
+                y=[action_probs[0] * 100, action_probs[1] * 100],
+                marker_color=["#EF4444", "#10B981"],
+                text=[f"{action_probs[0]:.1%}", f"{action_probs[1]:.1%}"],
+                textposition="auto",
+            )
+            fig_title = "Distribution de Probabilité de la Politique π(a|s)"
+            yaxis_title = "Probabilité (%)"
+            yaxis_range = [0, 100]
+            value_display = f"Valeur d'état estimée : **$V(s) = {value_est.item():.2f} $**"
+
+        else:  # DQN
+            agent = dqn_agent
+            state_tensor = state_tensor.to(agent.device)
+            q_values = agent.q_network(state_tensor)
+            q_values_np = q_values.cpu().numpy()[0]
+            decision = int(np.argmax(q_values_np))
+
+            # Graphique des valeurs Q
+            fig_data = go.Bar(
+                x=["0: Rejeter", "1: Approuver"],
+                y=[q_values_np[0], q_values_np[1]],
+                marker_color=["#EF4444", "#10B981"],
+                text=[f"{q_values_np[0]:.2f}", f"{q_values_np[1]:.2f}"],
+                textposition="auto",
+            )
+            fig_title = "Valeurs Q(s, a) estimées par le réseau DQN"
+            yaxis_title = "Valeur Q"
+            yaxis_range = None  # pas de range fixe
+            value_display = f"Meilleure valeur Q : **max_a Q(s,a) = {q_values_np[decision]:.2f} $**"
 
     # Calculs financiers et de risque
     p_default = calculate_default_probability(clean_sample.iloc[0])
@@ -208,7 +268,7 @@ with tab1:
     max_loss = max(0.0, gross_loss - min(gross_loss, asset_coverage * 0.8))
 
     st.markdown("---")
-    st.markdown("### 🏆 Verdict de l'Agent PPO & Analyse Financière")
+    st.markdown(f"### 🏆 Verdict de l'Agent {model_choice} & Analyse Financière")
 
     col_res1, col_res2 = st.columns([1, 1.2])
 
@@ -221,18 +281,12 @@ with tab1:
             st.caption("L'agent estime que le risque ou l'insuffisance de garantie est défavorable au capital bancaire.")
 
         st.write("")
-        # Graphique des probabilités d'action
-        fig_prob = go.Figure(go.Bar(
-            x=["0: Rejeter", "1: Approuver"],
-            y=[action_probs[0] * 100, action_probs[1] * 100],
-            marker_color=["#EF4444", "#10B981"],
-            text=[f"{action_probs[0]:.1%}", f"{action_probs[1]:.1%}"],
-            textposition="auto",
-        ))
+        # Graphique (probabilités ou Q-valeurs)
+        fig_prob = go.Figure(fig_data)
         fig_prob.update_layout(
-            title="Distribution de Probabilité de la Politique π(a|s)",
-            yaxis_title="Probabilité (%)",
-            yaxis_range=[0, 100],
+            title=fig_title,
+            yaxis_title=yaxis_title,
+            yaxis_range=yaxis_range,
             height=260,
             margin=dict(l=20, r=20, t=40, b=20),
         )
@@ -250,7 +304,7 @@ with tab1:
         m5.metric("Perte Nette si Défaut", f"-{max_loss:,.2f} $", help="Perte nette après liquidation du collatéral avec décote de 20%.")
 
         st.info(
-            f"💡 **Recommandation du Système** : Pour ce dossier ({loan_category}, FICO {risk_score}), la valeur d'état estimée par le Critic est de **$V(s) = {value_est.item():.2f}$**."
+            f"💡 **Recommandation du Système** : Pour ce dossier ({loan_category}, FICO {risk_score}), {value_display}"
         )
 
 
@@ -259,7 +313,7 @@ with tab1:
 # ==============================================================================
 with tab2:
     st.subheader("📊 Évaluation Globale sur le Portefeuille de 500 Dossiers")
-    st.write("Comparez la stratégie apprise par l'agent PPO face aux stratégies conventionnelles sur l'ensemble des données historiques.")
+    st.write("Comparez les stratégies apprises (PPO et DQN) face aux politiques conventionnelles sur l'ensemble des données historiques.")
 
     if st.button("🚀 Exécuter la Simulation Complète du Portefeuille", type="primary"):
         with st.spinner("Simulation des 500 dossiers en cours..."):
@@ -289,20 +343,25 @@ with tab2:
                 run_policy("1. Tout Approuver (Naïf)", lambda obs, r: 1),
                 run_policy("2. Aléatoire (50/50)", lambda obs, r: int(rng.integers(0, 2))),
                 run_policy("3. Heuristique Experte", lambda obs, r: 1 if (r["Risk_Score"] >= 580 and r.get("Debt_to_Income_Ratio", 0.5) < 0.45) else 0),
-                run_policy("4. Agent PPO (RL)", lambda obs, r: agent.select_action(obs, deterministic=True)[0]),
+                run_policy("4. Agent PPO (RL)", lambda obs, r: ppo_agent.select_action(obs, deterministic=True)[0] if ppo_loaded else 0),
             ]
+            # Ajouter DQN si le modèle existe
+            if dqn_loaded:
+                bench_results.append(
+                    run_policy("5. Agent DQN (RL)", lambda obs, r: dqn_agent.select_action(obs, deterministic=True))
+                )
             st.session_state["bench_df"] = pd.DataFrame(bench_results)
 
     if "bench_df" in st.session_state:
         df_res = st.session_state["bench_df"]
 
-        # 4 Indicateurs Clés pour l'agent PPO
-        ppo_row = df_res[df_res["Stratégie"].str.contains("PPO")].iloc[0]
+        # Indicateurs clés : on prend la meilleure stratégie en profit (généralement PPO ou DQN)
+        best_row = df_res.loc[df_res["Profit_Net"].idxmax()]
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Profit Net PPO", f"{ppo_row['Profit_Net']:,.2f} $", delta="+62,724 $ vs Naïf")
-        kpi2.metric("ROI PPO", f"{ppo_row['ROI']:.2f} %", delta="+7.00% vs Naïf")
-        kpi3.metric("Taux d'Approbation", f"{ppo_row['Taux_Approbation']:.1f} %", help="352 dossiers approuvés sur 500")
-        kpi4.metric("Capital Épargné", "7.0 M$", delta="Moins d'exposition risquée")
+        kpi1.metric("Meilleur Profit Net", f"{best_row['Profit_Net']:,.2f} $", delta=f"{best_row['Stratégie']}")
+        kpi2.metric("ROI associé", f"{best_row['ROI']:.2f} %")
+        kpi3.metric("Taux d'Approbation", f"{best_row['Taux_Approbation']:.1f} %")
+        kpi4.metric("Taux de Défaut", f"{best_row['Taux_Défaut']:.1f} %")
 
         st.markdown("---")
 
@@ -362,12 +421,14 @@ with tab3:
               $$r_t = 10^{-4} \times \begin{cases} -10\$ & \text{si } a=0 \\ \text{EAD} \cdot (r_{\text{prêt}} - r_{\text{fonds}}) \cdot \frac{\text{Durée}}{12} & \text{si } a=1 \text{ (sans défaut)} \\ -(\text{EAD}\cdot\text{LGD} - \text{Garantie})_+ & \text{si } a=1 \text{ (avec défaut)} \end{cases}$$
             - **Objectif PPO Clippé** :
               $$L^{\text{CLIP}}(\theta) = \hat{\mathbb{E}}_t \left[ \min\left( r_t(\theta) \hat{A}_t, \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon)\hat{A}_t \right) \right]$$
+            - **Perte TD de DQN** :
+              $$\mathcal{L} = \mathbb{E}_{(s,a,r,s') \sim \mathcal{D}} \left[ \left( r + \gamma \max_{a'} Q_{\text{target}}(s', a') - Q(s, a) \right)^2 \right]$$
             """
         )
 
     with col_t2:
         st.markdown("#### 🖥️ Accès au Dashboard TensorBoard")
-        st.info("Pour inspecter les gradients, la Policy Loss, la Value Loss et l'Entropie en direct :")
+        st.info("Pour inspecter les courbes de perte, récompenses, profits et taux :")
         st.code("tensorboard --logdir runs", language="bash")
         st.write("Puis ouvrez [http://localhost:6006](http://localhost:6006) dans votre navigateur.")
 
