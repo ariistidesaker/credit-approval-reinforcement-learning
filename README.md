@@ -46,7 +46,12 @@ credit-approval-reinforcement-learning/
 │   └── best_ppo_agent.pt         # Poids du meilleur modèle PPO entraîné
 ├── reports/
 │   ├── learning_curves.png       # Graphiques d'entraînement multi-panneaux
-│   └── training_history.csv      # Historique complet des métriques par épisode
+│   ├── training_history.csv      # Historique complet des métriques par épisode
+│   ├── UI-1.png                  # Simulateur client : saisie du dossier
+│   ├── UI-2.png                  # Verdict PPO et analyse financière
+│   ├── UI-3.png                  # Benchmark portefeuille (KPI et graphiques)
+│   ├── UI-4.png                  # Tableau comparatif des stratégies
+│   └── UI-5.png                  # Monitoring d'entraînement PPO
 ├── runs/                         # Événements et logs TensorBoard
 └── tests/
     ├── test_environment.py       # Tests unitaires de l'environnement MDP
@@ -185,6 +190,38 @@ L'environnement est implémenté sous la classe [`CreditApprovalEnv`](src/credit
 > - **Surpasse la politique naïve** en profit net ($+62\,724\$$ de bénéfice supplémentaire) tout en engageant **$5.7$ millions de dollars de capital en moins** ($19.17\text{M}\$$ contre $24.88\text{M}\$$).
 > - **Augmentation du ROI** à **$22.73\%$** (+5.47 points de pourcentage par rapport au tout approuver).
 > - L'agent a appris à rejeter de manière ciblée les dossiers à profil asymétrique défavorable (faibles taux / garanties insuffisantes / risque de défaut élevé).
+
+---
+
+## Image de Présentation
+
+Aperçu de l'application Streamlit (`streamlit run app.py`) : simulateur individuel, benchmark de portefeuille et monitoring d'entraînement.
+
+### Simulateur client individuel
+
+Formulaire d'évaluation en temps réel : profil emprunteur, caractéristiques du prêt et contexte macroéconomique.
+
+![Simulateur client — saisie du dossier](reports/UI-1.png)
+
+Verdict de l'agent PPO, ratios financiers (P(Défaut), DTI, couverture) et distribution de la politique $\pi(a \mid s)$.
+
+![Verdict PPO et analyse financière](reports/UI-2.png)
+
+### Benchmark de portefeuille (500 dossiers)
+
+Comparaison des stratégies (naïve, aléatoire, heuristique, PPO, DQN) : profit net cumulé et ROI.
+
+![Benchmark portefeuille — KPI et graphiques](reports/UI-3.png)
+
+Tableau détaillé : approbations, défauts, volume prêté, profit net et ROI.
+
+![Tableau comparatif des stratégies](reports/UI-4.png)
+
+### Monitoring de l'entraînement PPO
+
+Courbes de pertes (policy / value), récompense, profit net et taux d'approbation vs défaut sur 150 épisodes.
+
+![Monitoring d'entraînement PPO](reports/UI-5.png)
 
 ---
 
