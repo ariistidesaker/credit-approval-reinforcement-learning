@@ -249,8 +249,8 @@ def download_and_save_data(target_dir: str = "data") -> str:
 La classe `CreditDataPreprocessor` prépare les variables pour les agents RL :
 - **Correction des anomalies** : Bornage d'EAD ($> 1000\$$), du score FICO ($[300, 850]$) et de la LGD ($[0, 1]$).
 - **Ratios financiers dérivés** :
-  $$\text{Debt\_to\_Income\_Ratio} = \frac{\text{Mensualité du prêt}}{\text{Revenu mensuel}}$$
-  $$\text{Coverage\_Ratio} = \frac{\text{Valeur de garantie Collatéral}}{\text{Montant demandé EAD}}$$
+  $$\text{Debt to Income Ratio} = \frac{\text{Mensualité du prêt}}{\text{Revenu mensuel}}$$
+  $$\text{Coverage Ratio} = \frac{\text{Valeur de garantie Collatéral}}{\text{Montant demandé EAD}}$$
 - **Encodage & Normalisation** : `OneHotEncoder` pour les catégories (`Loan_Category`, `Employment_Status`) et `StandardScaler` pour les 12 variables continues, produisant une matrice d'état de dimension `(500, 18)`.
 
 #### 2. Modélisation du Risque et Calcul Financier (`src/utils.py`) :
